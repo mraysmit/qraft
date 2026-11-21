@@ -1,40 +1,181 @@
 # Qraft Distributed Service Platform Design
 
 **Status:** Draft  
-**Last updated:** 2026-11-20 (section 15.3: the audit file rotates by size. Earlier, 2026-11-18: section 7.2: the audit read pages back by the byte offset each read stopped at, and the third list's link is to its archive. Earlier, 2026-11-17: section 11: for the administrative interface, a destroy carries its cause, the event query takes `session`, and the sessions and locks reads of UI-6's second list. Earlier, 2026-11-15: section 18: the autopilot read's health counted in heartbeat rounds, as the members read's reachability is. Earlier the same day: section 12.5: a forwarded write withdrawn before it is sent, when its follower stops following the leader, is answered `leader_unavailable`. Earlier the same day: section 15: the administrative interface's security status read, `GET /v1/internal/ui/acl/status`. Earlier, 2026-11-13: section 13: a follower that stops following the leader it forwarded a write to answers the write at once as perhaps applied. Earlier, 2026-11-10: section 14.9's removed-server limitation qualified for the adopted pre-vote term of section 14.10. Earlier, 2026-11-07: ACL list Phases 5 to 9: the ACL API, the client's tokens and its own decisions, node identity, and expiry and revocation, in sections 15.1, 16 and 22. Earlier the same day: a later term in a pre-vote answer is adopted, at the owner's decision, in section 14.10; a configured management file keeps the bootstrap endpoint closed until its token is installed, at the owner's decision, in section 16. Earlier, 2026-11-06: ACL list Phase 4: enforcement on the server's HTTP API, removals and gRPC API, in sections 12.5, 15.1, 16 and 22; the ACL list's link renamed. Earlier, 2026-11-05: ACL list Phase 3: the ACL and security-profile settings, the startup warnings, the bootstrap endpoint and the management file, in sections 15.1 and 16; an entry holding an unknown command refused, in section 15.1. Earlier the same day: ACL list Phase 2: the authorizer and the rule parser, in section 15.1. Earlier, 2026-11-04: ACL list Phase 1: the replicated ACL state, in sections 1.1, 14.8, 15.1 and 22. Earlier, 2026-11-02: a name in a read route's path may contain a slash, and a registration that cannot be kept is logged as an ERROR. Earlier, 2026-11-01: the client list archived, and its link updated. Earlier the same day: client list Phase 8's check of the design: applications talk to their local client, in sections 4.3, 5, 6.2, 8.1 and 16. Earlier the same day: client list Phase 7: discovery reads through the local API, and the server's discovery reads refuse a query parameter they do not know, in sections 12.1 and 12.1.3. Earlier the same day: dated task-list links refreshed. Earlier, 2026-10-31: client list Phase 6A: an unreachable node's services leave `?passing`, and a health entry carries its node's status, in sections 9.2 and 12.1.1. Earlier the same day: section 12.1.3's comparison with Consul corrected, and section 9.2 records a gap that client list Phase 6A closes. Earlier the same day: client list Phase 6: `self`, `members` and `leave` on the local API, in sections 8.4 and 12.1.3. Earlier the same day: client list Phase 5: TTL status and maintenance through the local API, in sections 12.1.3 and 16. Earlier the same day: client list Phase 4: services and checks through the local API, in sections 6.2, 7.4, 8.2, 12.1.3 and 16. Earlier, 2026-10-30: client anti-entropy and `GET /v1/catalog/node-services/{nodeName}` in sections 7.3, 8.2, 12.1 and 22; a check ID unique across a client in section 16. Earlier the same day: client list Phase 2, the server side: the node ID and the rules for who may hold a name, after Consul's catalog, in sections 7.3 and 22, and the `X-Qraft-Node-ID` header, the 409 `node_name_reserved` refusal and the node listing's `id` in sections 12.1 and 12.1.2. Earlier, 2026-10-27: section 12.4.1: how the Vite build names the asset manifest, and the security profile in the bootstrap data. Earlier, 2026-10-26: client list Phase 1: the server's service and check write routes moved from `/v1/client/*` to `/v1/catalog/*` in sections 12.1, 12.1.1 and 12.1.2. Earlier, 2026-10-25: Pre-Vote, section 14.10, with the silent-leader and the test-practice notes in sections 14.10 and 19.6; the shutdown-refusal and snapshot-backoff notes in 14.9. Earlier, 2026-10-21: Step 6 disruptive-server validation verified with manual-timer tests; Step 7 is next. Earlier: Step 5 runtime policy and automatic failed-voter cleanup implemented and verified; dated task-list links refreshed. Earlier, 2026-10-14: Phase 8 documentation reconciliation against `f737d6b`: native storage futures, explicit executor ownership and callback rules, caller-context restoration, and the current node-model boundary. Phase 7 added the executor and fencing descriptions on 2026-10-13. On 2026-10-11: section 14.5: the compaction index comes from RaftLog's storage interface, with `raftlog-core` 1.5.0 in section 14.7; section 18: one scrape of each server, and the warning a stopping gRPC server can log. On 2026-10-10: recovery in sections 14.4, 14.5, and 22: an interrupted first snapshot is set aside and no longer stops a server, and a WAL compacted further than the published snapshot reaches is refused. On 2026-10-09: the node model in section 7.3, the node routes in section 12.1.2, what a node's deregistration removes, and the readiness of a server that does not campaign in section 6.1. On 2026-10-08: Phase 3 package ownership and dependency directions in section 1.1)
+**Last updated:** 2026-11-21
 
-## 1. Purpose
+This document is Qraft's design: what Qraft is and why, the contracts its parts keep,
+and the rules that decide its behaviour. Reference detail lives elsewhere:
+
+- [`docs/HTTP_API.md`](../docs/HTTP_API.md): every route, its parameters, bodies,
+  answers and error codes.
+- [`docs/CONFIGURATION.md`](../docs/CONFIGURATION.md): every setting and its default.
+- [`docs/OPERATIONS.md`](../docs/OPERATIONS.md): the operator runbook.
+- [`docs/TESTING.md`](../docs/TESTING.md): how the suites run and how logs are audited.
+- [`docs/QRAFT_EVENT_ARCHITECTURE.md`](../docs/QRAFT_EVENT_ARCHITECTURE.md): the event
+  model.
+- [`QRAFT_ADMIN_UI_UX_DESIGN.md`](QRAFT_ADMIN_UI_UX_DESIGN.md): the administrative
+  interface's design.
+
+The task lists and plans that built each part are kept for history in
+[`docs/archive/`](../docs/archive).
+
+## 1. Purpose and scope
 
 Qraft is a distributed service-discovery and coordination platform built around a
-Raft-replicated state machine. It provides a single runtime that can operate as a
-cluster server or as a client, together with APIs for service registration,
-discovery, health, key/value data, sessions, and locks.
+Raft-replicated state machine, on the model of HashiCorp Consul. One executable runs
+either as a cluster server or as a client, and together they provide service
+registration, discovery, health checking, key/value data, sessions and locks, tenancy,
+access control, events, DNS and an embedded administrative interface.
 
-This document records the current architecture, the target design, the important
-domain invariants, and the test-first path from the current implementation to the
-target system.
+This document covers the platform's architecture, domain model, replication,
+consistency, persistence, security, lifecycle and test strategy. It names Consul's
+behaviour where Qraft follows it and says why where Qraft departs from it. It does not
+list routes or settings; the reference documents above do.
 
-### 1.1 Project structure
+## 2. Goals
+
+- **One deployable artifact.** Run the same executable and container image in either
+  `server` or `client` mode. The mode is chosen at startup, so both modes share
+  versioning, configuration conventions, packaging, diagnostics and process
+  management without becoming separate distributions.
+- **Raft-authoritative cluster state.** Replicate every authoritative cluster mutation
+  through Raft and acknowledge it only after it is committed and applied. No HTTP
+  handler, background task or administrative operation creates a mutation path
+  around consensus.
+- **Independent clients.** Keep clients outside the Raft quorum, so workload nodes can
+  scale, restart and lose connectivity without changing consensus membership. Clients
+  contribute registrations and observations; servers decide and keep authoritative
+  state.
+- **Scoped and useful discovery.** Discover services by tenant, namespace, service
+  name and health, with stable instance identity and deterministic ordering. Callers
+  can tell healthy candidates, degraded candidates and absent services apart without
+  depending on one server's local state.
+- **Deterministic replicated behaviour.** Applying the same committed command sequence
+  and snapshot produces the same state and indexes on every server. State-machine
+  application therefore never depends on a local clock, a network call, a filesystem
+  observation or unordered iteration.
+- **Operational resilience.** Preserve committed state and restore service after
+  leader changes, partitions, process restarts, snapshot recovery and supported
+  rolling upgrades. Loss of quorum may reduce availability; it never creates
+  divergent authoritative state.
+- **Explicit consistency and failure semantics.** Make each read mode's freshness
+  visible, and tell rejected, retryable and outcome-unknown writes apart, so callers
+  can retry safely without parsing log messages or assuming that a lost response means
+  a failed commit.
+- **Integrated administration.** Provide a built-in interface for inspecting and
+  operating the platform without a separate management product. The interface uses
+  the same APIs, authorization rules, Raft command path and consistency guarantees as
+  every other caller.
+- **Bounded, testable lifecycle management.** Give every resource an explicit owner,
+  and make startup, readiness, drain, shutdown and partial-startup cleanup observable
+  in tests. Lifecycle operations are idempotent and complete or fail within known
+  deadlines.
+- **Direct use of Java 27.** Build concurrency, networking and lifecycle control on
+  Java 27 platform APIs rather than a framework-managed event loop. A shared
+  abstraction exists only where it expresses a Qraft contract or makes ownership and
+  testing clearer.
+
+## 3. Principles
+
+1. **Replicate intent, derive views.** Raft records validated commands that state what
+   should change. Catalogs, indexes, health summaries and query structures are
+   deterministic projections of the committed sequence, rebuildable from a snapshot and
+   the commands after it, never an independent source of truth.
+2. **Separate wire contracts from stored state.** HTTP and gRPC request objects belong
+   to adapter boundaries and are validated and mapped into domain commands. Persisted
+   models evolve under explicit compatibility rules and are never accidental
+   serializations of a public DTO.
+3. **Make ownership explicit.** Every executor, timer, socket, HTTP client, server,
+   subscription and storage handle has exactly one lifecycle owner. Owners close
+   resources in a defined order, and callers receive one idempotent completion rather
+   than relying on shutdown hooks or garbage collection.
+4. **Treat retries as part of the protocol.** Classify an operation as idempotent or
+   not before defining its timeouts, failover and retries. Request identity, duplicate
+   handling, retry limits and terminal rejection are specified at the same boundary as
+   the operation.
+5. **Expose uncertainty.** A transport failure proves only that the caller received no
+   result, not that the command was not committed. APIs and clients distinguish
+   definite rejection, safe retry and unknown outcome, so recovery reconciles against
+   authoritative state.
+6. **Preserve compatibility deliberately.** Protobuf fields are never renumbered,
+   snapshots and commands define defaults for new fields, and readers keep old formats
+   for a migration window. Fixture-based upgrade tests prove compatibility before a
+   format change is accepted. A decision that affects durable identity or wire
+   compatibility needs an explicit architecture decision record and those fixtures
+   before it is implemented.
+7. **Keep tests behavioural.** Tests exercise observable results through real
+   implementations, protocol-level fixtures, purpose-built fakes and integration
+   clusters, not mocking frameworks. Tests at persistence, transport and packaging
+   boundaries verify serialization, failure behaviour, recovery and cleanup as well as
+   the successful path.
+8. **Keep consensus membership server-only.** Clients never take part in elections,
+   quorum membership or log replication. They use only the public control-plane
+   protocols, so the client population changes independently of the small, deliberately
+   configured server quorum.
+9. **Configure from one file, never the environment.** Each process reads one versioned
+   JSON document. No production code reads an environment variable for configuration,
+   no document interpolates one, and no environment variable locates the document.
+   Secrets are mounted files that the document names.
+10. **Follow Consul unless there is a reason not to.** Routes, field names, rules and
+    defaults follow Consul's where they fit, so its documentation and experience carry
+    over. Each departure is deliberate and stated where the rule is (section 16 lists
+    them).
+
+## 4. Architecture
+
+### 4.1 Layers and packages
 
 Qraft is one Maven project. The root `pom.xml` builds one executable jar,
-`target/qraft.jar`, for `server` and `client` modes and owns dependency versions,
-Java 27 compilation, test conventions, and coverage configuration.
+`target/qraft.jar`, for both modes, and owns dependency versions, Java 27 compilation,
+test conventions and coverage gates. The production code is divided into six layers,
+each its own package tree under `dev.mars.qraft`:
 
-Phase 3 gives each layer its own package tree. `PackageDependencyTest` reads
-compiled production references with the JDK class-file API. Compiled mutation
-fixtures prove forbidden dependencies are rejected, including Raft and replicated
-state referring to server HTTP or the runtime entry point.
-
-| Layer | Packages | Responsibility |
+| Layer | Package | Responsibility |
 |---|---|---|
-| Raft | `dev.mars.qraft.raft` and subpackages | Consensus implementation, contracts under `raft.api`, transport, generated Raft protocol classes, durable storage adapters, and Raft metrics. |
-| Replicated state | `dev.mars.qraft.state`, `state.catalog`, `state.distributed`, `state.acl` | Deterministic state host, replicated commands/codecs, catalog projections, health observations, distributed metadata, and ACL tokens, policies and roles (section 15.1). |
-| Common | `dev.mars.qraft.common` and subpackages | Shared node models and `ServiceDefinition`, the ACL rule model and identities (`common.acl`), configuration helpers, deadlines, caller-context propagation, `RaftStateLoop`, and `BlockingTaskExecutor`. |
-| Client | `dev.mars.qraft.client` and subpackages | Registration, server-seed failover, reconciliation, heartbeat scheduling, local checks, liveness/readiness, and bounded graceful shutdown. |
-| Server | `dev.mars.qraft.server` and subpackages | Server composition/lifecycle, HTTP and external gRPC adapters, telemetry exporters, background health processing, and administrative UI. |
-| Runtime | `dev.mars.qraft.runtime` | Executable mode selection, operator command, and runtime-owned completion/shutdown boundary. |
+| Raft | `raft` | Consensus: `RaftNode`, elections, replication, membership (`RaftMembership`, `RaftMembershipPolicy`, `MembershipService`, `ClusterBootstrap`), the transition sequencer, persistence (`RaftPersistence`), the gRPC transport and its TLS, write forwarding (`ForwardCall`), snapshots' configuration envelope, Raft status and events. |
+| | `raft.api` | The contracts replicated state implements: `ReplicatedStateMachine`, `ReplicatedCommand`, `CommandCodec`, `SnapshotStore`. |
+| | `raft.storage`, `raft.storage.snapshot` | `RaftStorageFactory`, which pairs RaftLog's WAL with Qraft's snapshot store; the durable server ID (`ServerIdentity`); `FileSnapshotStore`. |
+| | `raft.metrics` | Raft metrics. |
+| | `raft.grpc` (generated) | The Raft protocol and the replicated command messages. |
+| Replicated state | `state` | `QraftStateStore`, the deterministic state host; the command types and their protobuf codecs; state metrics. |
+| | `state.catalog` | Service instances, their identity, health checks and observations, and the read-only catalog view. |
+| | `state.kv` | The key/value store. |
+| | `state.session` | Sessions and their commands. |
+| | `state.tenancy` | Tenants, namespaces and `ScopedWrite`, the wrapper that checks a write's scope at its place in the log. |
+| | `state.acl` | Tokens, policies, roles, auth methods and binding rules. |
+| | `state.distributed` | The older distributed metadata map and its legacy codec. |
+| Common | `common` | `Node`, `NodeStatus`, `ServiceDefinition`, `QraftVersion`. |
+| | `common.acl` | The ACL rule model, identities and the shared authorizer, `AclAuthorizer`. |
+| | `common.async` | `RaftStateLoop`, `BlockingTaskExecutor`, `CallerContext`. |
+| | `common.concurrent` | `Deadlines`, `Completions`. |
+| | `common.config` | Configuration-file discovery, placeholder refusal and JSON setting helpers. |
+| | `common.dns` | The DNS codec, resolver and server both modes use. |
+| | `common.events` | Event contracts and the bounded `EventJournal`. |
+| | `common.http` | `JsonApi`, the request handling both modes' HTTP servers share. |
+| | `common.storage` | Durable files and identity files (`server-id`, `node-id`). |
+| | `common.tls` | TLS material, its reloading and listener settings. |
+| Client | `client` | `QraftClient`, the client data directory and quiescence. |
+| | `client.service` | The local API (`LocalApiServer` and its routes), local definitions, the registration store, readiness, heartbeats and client metrics. |
+| | `client.catalog` | `CatalogClient`, `HttpCatalogClient`, server endpoints and retry policy, contact tracking, forwarded reads and the reconciler. |
+| | `client.health` | Local HTTP, TCP, TTL and maintenance checks and `HealthPublisher`. |
+| | `client.config` | Client configuration and service-definition parsing. |
+| | `client.acl` | The client's tokens, its ACL resolver and cache, and `ClientAuthorizer`, which decides the local API. |
+| | `client.api` | The Java client library: `QraftApi`, `KeyValue`, `Sessions`, `LeaderElection`. |
+| Server | `server` | `QraftServerApplication` and `QraftServerService`: composition and lifecycle. |
+| | `server.http` | `HttpApiServer` and its route classes, request DTOs, the request context, audit and request metrics. |
+| | `server.api` | The external gRPC `DistributedStateService` and its ACL guard; generated classes in `server.api.grpc`. |
+| | `server.acl` | Token resolution, token expiry, management-token installation, JWT and Kubernetes login. |
+| | `server.health` | Leader-owned check and node expiry. |
+| | `server.session` | `SessionTtlExpiry`, the leader's session timers. |
+| | `server.recovery` | Offline inspection and lost-quorum recovery. |
+| | `server.config` | `AppConfig`, the effective configuration and the security profile. |
+| | `server.lifecycle` | `ShutdownCoordinator`. |
+| | `server.observability` | Telemetry configuration. |
+| | `server.ui` | The embedded administrative interface's assets and handler. |
+| Runtime | `runtime` | The entry point, mode selection, the runtime lifecycle, and the `operator raft`, `acl` and `kv` command lines. |
 
-Allowed dependencies are:
+Allowed dependencies, enforced by
+`src/test/java/dev/mars/qraft/architecture/PackageDependencyTest.java`:
 
 ```text
 Runtime -> every layer; nothing else uses Runtime
@@ -45,1926 +186,1024 @@ Raft    -> Common
 Common  -> no other Qraft layer
 ```
 
-Cycles are prohibited. Raft never uses State, Server, Client, or Runtime.
-Replicated state never uses Server HTTP, server lifecycle, or client code.
-Public HTTP and external gRPC DTOs stay at adapter boundaries and map explicitly
-to domain commands. Protobuf Java packages follow ownership while the wire
-namespaces `qraft.raft` and `qraft.api` remain unchanged.
+- Cycles are prohibited. Raft never uses State, Server, Client or Runtime; replicated
+  state never uses Server or Client.
+- Every Qraft type belongs to one of the six layers; the test refuses an unclassified
+  package. It reads compiled references with the JDK class-file API, and compiled
+  mutation fixtures prove that forbidden references are reported.
+- Public HTTP and gRPC DTOs stay at adapter boundaries and map explicitly to domain
+  commands.
+- Generated protobuf classes follow ownership (`raft.grpc`, `server.api.grpc`), while
+  the wire namespaces `qraft.raft` and `qraft.api` and the service names
+  `qraft.raft.RaftService` and `qraft.api.DistributedStateService` stay fixed
+  (`ProtocolPackageTest`).
 
-The client configuration retains its `client` and `servers` objects;
-`/v1/client/*` paths left the server on 2026-10-26 for `/v1/catalog/*` (section 12.1) and now
-belong to the client's local API (the Consul-style client list). Node models remain
-in Common; Phase 4 removed their inherited fleet fields (section 7.3).
+### 4.2 Runtime and modes
 
-Until 2026-10-04 the build had seven Maven modules. The unused `qraft-tenant`
-module was removed; namespaces return as replicated state in section 15.
-[`QRAFT_EVENT_ARCHITECTURE.md`](../docs/QRAFT_EVENT_ARCHITECTURE.md) proposes
-event contracts that will become another package/layer when implemented.
+`dev.mars.qraft.runtime` owns the entry point. It takes the mode from the required
+subcommand, `server` or `client`; the container image selects the mode through its
+command, never through an environment variable. The runtime resolves the configuration
+file before dispatch, in this order, and launches the mode through an injected mode
+boundary:
 
+1. `--config <path>`;
+2. the `qraft.config` JVM system property;
+3. `config/server.json` or `config/client.json` in the working directory;
+4. `/etc/qraft/server.json` or `/etc/qraft/client.json`.
 
-## 2. Goals
+Both modes return the same runtime-owned lifecycle: its completion, one idempotent
+asynchronous close, and the addresses its listeners bound, by name (`http`, `raft`,
+`apiGrpc` and `dns` for a server; `http` for a client). The process entry point and its
+shutdown hook use that lifecycle directly; no mode starts another application's static
+`main`.
 
-These goals describe the operational outcomes the platform is intended to
-provide. Later sections turn them into domain, protocol, persistence, lifecycle,
-and acceptance requirements.
+Configuration is read and validated before any resource opens. Unknown settings,
+duplicate JSON keys, missing files and environment-style placeholders (any `${` in a
+string value or field name) are refused, naming the JSON path. Parsing accepts an
+injected document for tests; only the executable boundary opens a file. The document is
+read once, at startup; only the TLS files it names are read again when they change
+(section 11.3). Every setting and its default are in [`docs/CONFIGURATION.md`](../docs/CONFIGURATION.md).
 
-- **One deployable artifact.** Run the same executable and container image in
-  either `server` or `client` mode. Role selection happens at startup so both
-  modes share versioning, configuration conventions, packaging, diagnostics,
-  and process-management behavior without becoming separate distributions.
-- **Raft-authoritative cluster state.** Replicate every authoritative cluster
-  mutation through Raft and acknowledge it only after it is committed and
-  applied. No HTTP handler, background task, or administrative operation may
-  create a competing mutation path around consensus.
-- **Independent clients.** Keep clients outside the Raft quorum so
-  workload nodes can scale, restart, and lose connectivity without changing
-  consensus membership. Clients contribute registrations and observations;
-  servers decide and retain authoritative cluster state.
-- **Scoped and useful discovery.** Discover services by tenant, namespace,
-  service name, and health state, with stable instance identity and deterministic
-  ordering. Callers must be able to distinguish healthy candidates, degraded
-  candidates, and absent services without depending on server-local state.
-- **Deterministic replicated behavior.** Applying the same committed command
-  sequence and snapshot must produce the same state and indexes on every server.
-  State-machine application therefore cannot depend on a local clock, network
-  call, filesystem observation, or unordered iteration.
-- **Operational resilience.** Preserve committed state and restore useful service
-  after leader changes, network partitions, process restarts, snapshot recovery,
-  and supported rolling upgrades. Temporary loss of quorum may reduce
-  availability, but must not create divergent authoritative state.
-- **Explicit consistency and failure semantics.** Make each read mode's freshness
-  guarantee visible and distinguish rejected, retryable, and outcome-unknown
-  writes. Clients should be able to make safe retry decisions without parsing
-  log messages or assuming that a lost response means a failed commit.
-- **Integrated administration.** Provide a built-in interface for inspecting and
-  operating the platform without requiring a separate management product. The
-  interface uses the same authenticated APIs, authorization rules, Raft command
-  path, and consistency guarantees as every other client.
-- **Bounded, testable lifecycle management.** Give every resource an explicit
-  owner and make startup, readiness, drain, shutdown, and partial-startup cleanup
-  observable in tests. Lifecycle operations must be idempotent and complete or
-  fail within documented deadlines.
-- **Direct use of Java 27.** Build concurrency, networking, and lifecycle control
-  on Java 27 platform APIs rather than a framework-managed event loop. Shared
-  abstractions are introduced only where they express a Qraft contract or make
-  ownership and testing clearer.
-
-## 3. Design principles
-
-1. **Replicate intent, derive views.** Raft records validated commands that state
-   what should change; catalogs, indexes, health summaries, and query structures
-   are deterministic projections of the committed sequence. Derived views must
-   be rebuildable from a snapshot and subsequent commands rather than acquiring
-   an independent source of truth.
-2. **Separate wire contracts from stored state.** HTTP and gRPC request objects
-   belong to adapter boundaries and are validated and mapped into domain
-   commands. Persisted models evolve under explicit compatibility rules and are
-   never accidental serializations of whichever public DTO a handler accepts.
-3. **Make ownership explicit.** Every executor, timer, socket, HTTP client,
-   server, subscription, and storage handle has exactly one lifecycle owner.
-   Owners close resources in a defined order, and callers receive one idempotent
-   completion rather than relying on shutdown hooks or garbage collection.
-4. **Treat retries as part of the protocol.** Classify an operation as idempotent
-   or non-idempotent before defining timeouts, failover, and retry behavior.
-   Request identity, duplicate handling, retry limits, and terminal rejection
-   must be specified at the same boundary as the operation itself.
-5. **Expose uncertainty.** A transport failure proves only that the caller did
-   not receive a result; it does not prove that the command was not committed.
-   APIs and clients distinguish definite rejection, safe retry, and unknown
-   outcome so recovery can reconcile against authoritative state.
-6. **Preserve compatibility deliberately.** Protobuf fields are never renumbered,
-   snapshots and commands define defaults for newly introduced fields, and
-   readers retain old formats for a documented migration window. Fixture-based
-   upgrade tests prove compatibility before a format change is accepted.
-7. **Keep tests behavioral.** Tests exercise observable results through real
-   implementations, protocol-level fixtures, purpose-built fakes, and integration
-   clusters rather than mocking frameworks. Tests at persistence, transport, and
-   packaging boundaries verify serialization, failure behavior, recovery, and
-   cleanup as well as the successful path.
-8. **Keep consensus membership server-only.** Clients never participate in
-   Raft elections, quorum membership, or log replication. They communicate only
-   through public control-plane protocols, allowing the client population to
-   change independently of the small, deliberately configured server quorum.
-
-## 4. Current architecture
-
-### 4.1 Runtime
-
-The `dev.mars.qraft.runtime` package owns the executable entry point and resolves `server`
-or `client` from the required command-line subcommand. The container image
-packages the runtime and selects the mode through its command, never through an
-environment variable.
-
-The runtime resolves the selected versioned configuration file before dispatch,
-then launches the server or client through an injected mode boundary. Both
-modes return the same runtime-owned lifecycle, which exposes completion and one
-idempotent asynchronous close operation. The process entry point and shutdown
-hook use that lifecycle directly; neither mode is started by invoking another
-application's static `main` method. A runtime-boundary acceptance test exercises
-real server and client startup, registration, discovery, readiness loss,
-server restart and reconciliation, deregistration, and ordered shutdown.
-
-### 4.2 Server
-
-Server mode currently owns:
-
-- Raft membership, elections, replication, snapshots, and check-quorum: a leader
-  steps down in its current term, failing uncommitted writes, when a majority
-  including itself has not acknowledged any request for one election timeout's
-  worth of heartbeat rounds. Counting applied rounds rather than wall-clock time
-  means a delayed state loop cannot cause a false step-down, and a single-node
-  cluster never steps down.
-- **Raft membership is recorded in the replicated log**, as in Consul.
-  - **The configuration.** Each voter and non-voter is listed with its server
-    ID, name and address. Each server uses the latest configuration in its log,
-    committed or not. A snapshot records the configuration it covers, in an
-    envelope around the state machine's own snapshot. Truncating an
-    uncommitted configuration reverts to the one before.
-  - **Counting.** Elections, commits and check-quorum count only voters, by
-    server ID. A reply counts, and is listened to at all (its term included),
-    only when the server ID it names is the one the configuration records for
-    that peer. A server that lost its storage comes back with a new server ID,
-    so it cannot vote or be counted for the server it replaced.
-  - **Campaigning.** A server that is not a voter in its configuration never
-    campaigns.
-  - **Changes.** A leader changes the configuration one server at a time. It
-    may start a change only after it has committed an entry in its current
-    term, and only when no other change is uncommitted. Any configuration
-    entry, however it is submitted, meets these rules. A server is added as a
-    non-voter; a change that adds a voter is refused.
-  - **Promotion**, as Consul's autopilot does it. A non-voter is replicated to
-    but not counted. At each heartbeat round the leader judges each non-voter
-    healthy when both hold:
-    - it has answered this leader within the last 2 heartbeat rounds. Only
-      replies to the current leadership are recorded, so this also means its
-      term matches the leader's (Consul's `LastContactThreshold` is 200 ms);
-    - its log trails the leader's by at most
-      `promotionMaxTrailingEntries` entries (default 250, Consul's
-      `MaxTrailingLogs`).
-
-    Once a non-voter has been healthy for `promotionStabilization` (default
-    10 s, Consul's `ServerStabilizationTime`, counted in heartbeat rounds),
-    the leader proposes the configuration with it as a voter. A lapse in
-    health starts the period again. One server is promoted at a time; a
-    promotion refused, for example while another change is uncommitted, is
-    tried at the next round. A new leader starts every period afresh.
-  - **Log invariants.** Index 1 always holds the bootstrap configuration, in
-    term 0. A follower refuses an append that would replace a committed
-    entry.
-  - **No upgrade.** A data directory that holds Raft state but no
-    configuration, which is data from before configurations were recorded,
-    refuses to start.
-  - **Joining.** A server with no Raft state that finds listed servers
-    already in a cluster asks them, in turn, to add it, as Consul's
-    `retry_join` tries every address. It stops at the first that answers for
-    a leader, passing over one that cannot be reached or knows no leader, and
-    asks again every second until the leader has replicated the
-    configuration to it. Any server forwards the request to the leader over
-    the Raft port; a server that cannot reach the leader answers that no
-    leader could be reached. The leader adds the server as a
-    non-voter, and promotes it as above. There is no operator command to add
-    a server, as in Consul.
-  - **Rejoining after lost storage.** A server that lost its storage comes
-    back under a new server ID. If another server ID holds its name or
-    address, admission is refused until an operator removes that entry with
-    the operator token, within the quorum rule below. The new server can
-    then join as a non-voter. A join alone never evicts another server ID.
-  - **Moving with its storage.** A server that comes back under its server
-    ID and name, but at a new address, has its configured address updated,
-    and keeps its vote, as Consul's `AddServer` does. A request under
-    another name, or for an address another server holds, is refused.
-    Startup retries joining when the recovered configuration records an old
-    self-address, until replication confirms the advertised address.
-  - **Removal.** An operator removes a server by ID or by name (section
-    12.5). A removal of a voter is refused unless the voters left, among
-    those the leader has heard from within its check-quorum window, are a
-    quorum. A non-voter can always be removed. A leader that removes itself
-    steps down once the removal commits, and never campaigns again; the
-    servers left elect a leader. It keeps running, but reports `removed` in
-    `/raft/status` and on `/health/ready`, and refuses writes as any
-    follower does, so it can be stopped. A follower removed by another
-    leader is no longer replicated to, so it may never learn of its removal.
-  - **Addresses.** The Raft transport reaches each configured server at the
-    address in the configuration, which overrides `server.raft.nodes`. A
-    joined server is in no server's list, and a rejoined server may have a
-    new address.
-  - **The Raft port is trusted without TLS.** Anyone who can reach it can
-    join a server that is later promoted, as they can already send Raft
-    messages. With `server.tls.raft` (section 15.2) it takes part only with
-    a certificate from the cluster's CA; without it, it belongs on a private
-    network.
-  - **Leader stickiness.** A leader ignores campaigns while check-quorum
-    allows it to lead. A follower ignores votes, including higher terms,
-    for the minimum election timeout after leader contact, measured by a
-    monotonic clock. After that interval it may vote again. This prevents
-    a removed server with an old configuration from disrupting a live cluster.
-  - **Requests name their target.** An append or a snapshot install names
-    the server ID the configuration records for the peer it is sent to. A
-    server refuses one that names another server ID, before its term, log,
-    or snapshot changes. A server that lost its storage answers at its old
-    address under a new server ID; it therefore cannot install a snapshot
-    meant for the entry it replaced, which would leave it holding a
-    configuration without itself.
-    Every new leader appends a no-op so an idle cluster can commit an entry
-    in that leader's term before changing membership.
-  - Steps 5 to 8 of
-    [`task-list-raft-membership-changes-2026-10-24.md`](../docs/archive/task-list-raft-membership-changes-2026-10-24.md)
-    cover automatic removal of failed servers, further disruptive-server
-    validation, recovery from lost quorum, and container scenarios.
-    Step 5's membership settings are parsed and validated by `AppConfig` and,
-    as of 2026-10-21, wired through `QraftServerService` into an immutable
-    `RaftMembershipPolicy`. Startup logs the effective settings and their
-    overflow-safe, ceiling-divided heartbeat rounds. Only applied heartbeat
-    rounds advance failure grace or the cleanup interval; delayed execution
-    never invents missed rounds. A new leadership starts a fresh grace, and
-    valid replies reset absence by durable server ID.
-    A cleanup pass freezes its committed voter count, eligible IDs in sorted
-    order, and budget `floor((N - 1) / 2)`. Before every sequenced proposal it
-    rechecks failure eligibility, the configured minimum, recent contact with
-    both current and proposed quorums, the current-term commit and the
-    single-change guard. It waits for each removal to commit before the next;
-    recovered candidates are skipped. Unrelated membership changes, failed
-    proposals and leadership changes abandon the pass. Failure tracking and
-    pass state are local and never persisted as membership.
-    Focused tests cover configuration wiring, manual-round boundaries,
-    promotion-triggered cleanup, safety limits, cancellation and real-WAL
-    reopening. The Step 5 gate passed on 2026-10-21: five consecutive affected
-    runs, the clean default build and coverage, the fresh-image runtime suite,
-    and retained-log audits. The task list holds the captures and remaining
-    Steps 6 to 8; the broader cleanup/replacement container matrix is still open.
-    A committed promotion can trigger cleanup after a
-    replacement joins with a distinct name and address; a replacement reusing
-    either still needs the old member removed first. Joins never evict a member.
-- **Bootstrapping.** A server with no Raft state asks every server in
-  `server.raft.nodes` to describe itself over the Raft port. It then decides:
-  - **Bootstrap.** Every listed server answers, none holds Raft state, and all
-    list exactly the same servers. It writes the configuration at index 1, in
-    term 0, treated as committed. The configuration is built from each
-    server's own answer, so every server that bootstraps writes the identical
-    entry.
-  - **Join.** A listed server already holds state. The server asks it to be
-    added (see Joining, above), and a leader of that cluster replicates the
-    configuration to it.
-  - **Retry.** Some listed server has not answered; it tries again every
-    second until it holds a configuration.
-  - **Never bootstrap.** The lists differ.
-
-  A sole member bootstraps itself.
-- Each server has a durable **server ID**, a UUID generated at its first start
-  and kept in `server-id` in the Raft data directory.
-  - A restart on the same storage keeps the ID. A wiped data directory gives a
-    new one.
-  - A data directory from before server IDs gets one at its next start.
-  - A file that exists but cannot be read stops the start; it is never
-    replaced.
-  - Every Raft request and response names its sender's server ID, an
-    append or snapshot install also names its target's, and
-    `/raft/status` and the startup log report it.
-- Durable Raft storage.
-- The replicated key/value, service-catalog, and health-check state machine.
-- Internal Raft gRPC transport.
-- External distributed-state gRPC service.
-- JDK HTTP health, status, catalog, health-observation, and health-discovery
-  endpoints.
-- Coordinated shutdown of Raft, servers, storage, and executors.
-
-Catalog registration, deregistration, health observation, and health expiry are
-encoded as protobuf commands and applied to `QraftStateStore`. The state machine
-accepts only a strictly newer sequence for each check. It derives aggregate
-service health deterministically, and an expiry changes state only when it matches
-the exact sequence and deadline. Catalog and health-check contents are included in
-snapshots, and the command codec can read legacy JSON log entries during
-migration.
-
-`PUT /v1/catalog/check/observe` stamps each observation with the receiving server's
-time before proposing it. `GET /v1/health/service/{serviceName}` returns each
-instance with its replicated checks and can be filtered to passing instances
-(section 12.1.1).
-
-Only the leader evaluates deadlines (section 9.1). It proposes explicit expiry
-commands, and followers apply them only as committed log entries. A registration
-may declare its check IDs; re-registering prunes undeclared checks and rejects
-later observations for them.
-
-### 4.3 Client
-
-Client mode currently owns:
-
-- A local identity and network address.
-- A local API on one JDK HTTP server: liveness, readiness, and what the applications
-  on its host use (section 12.1.3).
-- A client-membership facade over the shared outbound server client.
-- A validated list of server seeds and local service definitions.
-- A `CatalogClient` port and `HttpCatalogClient` adapter for service registration,
-  deregistration, and scoped presence reads across server seeds.
-- A single-flight reconciler for enabled local service definitions.
-- A scheduled heartbeat publisher.
-- `LocalHealthChecks`, which runs configured HTTP, TCP, and TTL checks
-  independently through an injected scheduler and clock and accepts
-  process-local TTL status through `LocalStatusReporter`.
-- `HealthPublisher`, which publishes check results as sequenced observations
-  through the shared server client.
-
-The client registers its node through the server's
-`PUT /v1/catalog/register`, `PUT /v1/catalog/node/heartbeat`, and
-`PUT /v1/catalog/deregister` endpoints (section 12.1.2). A failed initial registration
-keeps the local API live and unready and retries in the background;
-readiness is derived continuously from lifecycle state, accepted node
-registration, convergence of every enabled local service definition, required
-checks, and the freshness of the last successful server response.
-
-Checks of enabled services start once node registration is accepted. The
-required-check readiness policy is: the client is unready while any required check
-has produced no result yet, or its latest local result is critical. Warning and
-maintenance results keep the client ready, optional checks never affect readiness,
-and liveness is unaffected by check results. Readiness therefore follows the
-health of the workloads the client represents, while server outages continue
-to withdraw readiness through contact freshness.
-
-`HealthPublisher` keeps at most one publication in flight per check and
-coalesces results that arrive meanwhile to the latest. A changed status or output
-is published immediately. An unchanged result is republished as a renewal once
-half the check's TTL has passed since the last acceptance. Sequence numbers are
-strictly increasing per check and start from the wall clock in milliseconds, so a
-restarted client normally exceeds the sequence its predecessor left behind. A
-`stale_observation` answer raises the floor to the server's current sequence and
-republishes. Retryable failures and `service_not_found` answers resend the same
-observation after the capped registration backoff, which the server treats as an
-idempotent replay; other rejections are logged and dropped.
-
-`HttpCatalogClient` sends the stable service schema and node, tenant, and
-namespace identity headers, assigns a fresh request ID to each attempt, enforces
-the configured request timeout, and returns sealed success, retryable, or rejected
-outcomes. Catalog operations, node registration, heartbeat, and node deregistration
-share this classified transport. It owns and idempotently closes its JDK
-`HttpClient`.
-
-After node registration, `QraftClient` immediately reconciles enabled service
-definitions and schedules subsequent passes on its lifecycle-owned scheduler.
-Successful registrations are retained across partial failures. Unchanged
-definitions are verified by catalog read rather than rewritten; missing instances
-are repaired, changed definitions are resubmitted, and unchanged rejected
-definitions remain reported without being retried every cycle.
-
-The definitions have one source (section 8.2): the `catalog.services` array, loaded
-once from the client JSON document at startup, and what the local API registers, which
-changes while the client runs. Runtime file watching and configuration reload are not
-implemented.
-
-Node, heartbeat, and catalog operations update one server-contact timestamp.
-If that timestamp becomes older than `catalog.contactFreshnessMs`, readiness
-returns 503 while liveness and background reconciliation continue. A later
-successful response restores readiness once node membership and service
-convergence are also satisfied. A client with no service definitions requires
-only accepted node registration and fresh server contact.
-
-Rejected node and service registrations are logged with their machine-readable
-code and message while the client remains live and unready. On shutdown, the client
-withdraws readiness before stopping scheduled work. It waits for an active
-reconciliation pass, deregisters every service known to have committed, prevents
-new node registrations, waits for an in-flight node registration, and then sends
-an idempotent node deregistration before stopping the local API and HTTP resources.
-All callers share one completion bounded by `client.shutdownTimeoutMs`; when the
-deadline expires, outstanding HTTP work is cancelled and incomplete cleanup is
-reported once.
-
-### 4.4 Known model gaps
-
-- Client operations rotate across ordered server seeds on retryable outcomes,
-  stop on rejection, and remember the last successful endpoint.
-- Reconciliation runs at the configured heartbeat cadence and has no independent
-  exponential-backoff schedule. Repeated node-registration cycles use the
-  configured capped exponential backoff with jitter.
-- The most recently successful endpoint is preferred even when it is a follower;
-  leader-aware write preference remains future work.
-- Runtime configuration reload is not implemented, so changing or removing a
-  service in the JSON file requires a client restart.
-- TCP checks have no warning outcome: a connection either succeeds or fails.
-
-Catalog identity and the registration boundary were corrected in Tranches 1 and
-2. Instances are keyed by `(tenantId, namespace, nodeId, serviceId)`, registration
-uses a dedicated request DTO, and authoritative health is initialized by the
-server. Tenant, namespace, datacenter, region, and enabled state are durable
-instance fields.
-
-## 5. Target system context
+No setting names a version of Qraft. Both modes report their build's project version,
+which the build writes into the jar's manifest, log it at startup, and a client carries
+it in its node's metadata as `qraft.version`. A process not run from the jar reports
+`development`.
 
 ```text
-Operators
+Operators, administrative interface
           |
-          | HTTP, gRPC
+          | HTTP, gRPC, DNS
           v
 +---------------- Qraft server cluster ----------------+
 |  Server A       Server B       Server C              |
 |  HTTP/gRPC      HTTP/gRPC      HTTP/gRPC             |
 |       \             |             /                  |
 |        +--------- Raft quorum --------+              |
-|                    |                                  |
+|                    |                                 |
 |          replicated state machine                    |
 +------------------------------------------------------+
           ^
-          | registration, health observations, renewal, forwarded reads
+          | registration, observations, heartbeats, forwarded reads and writes
           |
 +---------+-----------+       +-------------------------+
 | Client              |       | Client                  |
 | node-a              |       | node-b                  |
-| local API           |       | local API               |
+| local API, DNS      |       | local API, DNS          |
 | local checks        |       | local checks            |
 | service definitions |       | service definitions     |
 +---------+-----------+       +------------+------------+
           ^                                ^
           | localhost                      | localhost
-          |                                |
      Applications                     Applications
 ```
 
-Applications talk only to the client on their own host, at `localhost` (section
-12.1.3). Through it they register their services and checks, report TTL status and
-discover other services, and the client keeps those registrations in sync with the
-servers and forwards discovery reads to them. A client and a server can also answer
-discovery by DNS (section 12.1.4).
-
-Servers are authoritative for committed cluster state. Clients are
-authoritative only for local observations and submit those observations as
-commands to the server cluster.
-
-## 6. Runtime modes
-
-### 6.1 Server mode
-
-`qraft server`:
-
-- Validates server configuration before opening resources.
-- Opens durable storage.
-- Starts internal Raft transport and the Raft node.
-- Starts public APIs only with accurate readiness semantics.
-- Participates in quorum and applies committed commands.
-- Enters drain mode before shutdown.
-
-A server is live when its process and local health server operate. It is ready
-when it can safely serve the advertised API behavior. `/health/ready` returns 200
-only when all of the following hold:
-
-- it is not draining;
-- recovery has finished;
-- it is not fenced;
-- it knows a current leader: it is the leader, or a follower of one.
-
-Otherwise it returns 503 with the error envelope. The code is `not_ready` and a
-`conditions` list names every failed condition: `draining`, `unavailable` (its
-Raft state cannot be read), `fenced`, or else `recovering`, `removed` (its
-removal from the Raft configuration has committed), and `no_leader`. The
-conditions are read as one consistent view on the Raft state loop. A candidate,
-or a server cut off from the majority, is unready until it rejoins a leader.
-That holds for a server that does not campaign, because it holds no
-configuration yet or is not yet a voter: when its election timer fires it
-forgets the silent leader, and reports `no_leader` until it hears from a leader
-again.
-Readiness does not yet depend on read consistency, because consistency modes do
-not exist yet. `/health/live` is unaffected by every condition.
-
-### 6.2 Client mode
-
-`qraft client`:
-
-- Validates client identity, server seeds, and service definitions.
-- Starts its local API, with liveness and readiness, before contacting the cluster.
-- Serves the applications on its host at `localhost`: their registrations, check
-  status and discovery reads (section 12.1.3).
-- Reconciles the services its configuration defines and its local API registers
-  with the replicated catalog.
-- Runs local health checks and publishes changes or TTL renewals.
-- Remains live but unready during a server outage.
-- Never opens Raft transport or durable Raft storage.
-
-## 7. Domain model
-
-### 7.1 Tenant
-
-A tenant is the top-level ownership and isolation boundary. It contains
-namespaces, services, key/value entries, sessions, locks, policies, quotas, and
-audit records.
-
-The initial deployment may expose only the `default` tenant, but tenant identity
-must be present in stored keys before multiple tenants are enabled.
-
-### 7.2 Namespace
-
-A namespace is an isolation boundary within a tenant, commonly representing an
-environment, team, or application group. Every namespaced resource defaults to
-the `default` namespace when no explicit value is supplied.
-
-Built on 2026-11-08 by [`task-list-tenancy-2026-11-08.md`](../docs/archive/task-list-tenancy-2026-11-08.md), on
-Consul's admin partitions, which Qraft calls tenants, and namespaces:
-
-- **State** (`state.tenancy`): tenants and their namespaces, each with a
-  description and the indexes that created and last changed it. The `default`
-  tenant and every tenant's `default` namespace always exist and cannot be deleted.
-  Names are lower-case DNS labels, and so are the scope headers.
-- **Enforcement**: a service registration, a key set and an acquisition into a
-  tenant or namespace that does not exist are refused 404 `tenant_not_found` or
-  `namespace_not_found`. The server checks, and the state machine checks again at
-  the entry's place in the log, through a wrapper only new servers propose, so a
-  log written before tenancy replays to the state it had.
-- **Lifecycle**: deleting a namespace removes its services, their checks and its
-  keys; deleting a tenant removes its namespaces.
-- **HTTP**: `/v1/tenant`, `/v1/tenants`, `/v1/namespace` and `/v1/namespaces`, with
-  `operator:write` to change and `operator:read` to read. A client's local API acts
-  in the client's own tenant and namespace when the caller names none.
-- **For the administrative interface** (2026-11-17, UI-6's
-  [`task-list-admin-ui-tenants-namespaces-audit-2026-11-18.md`](../docs/archive/task-list-admin-ui-tenants-namespaces-audit-2026-11-18.md)):
-  - each tenancy change produces a domain event in the scope it names, the same
-    on every replica;
-  - `GET /v1/internal/ui/scopes` answers what each namespace holds;
-  - an audit record names the request's tenant and namespace;
-  - `GET /v1/internal/ui/audit` reads the answering server's audit file from
-    its end, filtered, and pages back by the byte offset each read stopped at
-    (`Next`, sent again as `from`), so no page scans again what the last one
-    read.
-
-### 7.3 Client and node
-
-A client is the client-mode process. A node is the stable logical identity that
-the client represents. One node can host multiple service instances.
-
-`nodeId` must remain stable across ordinary client restarts. An automatically
-generated ID must be persisted locally; a hostname alone is not a sufficient
-identity in environments where names can be reused.
-
-A node in the replicated registry has the shape of a Consul node, together with
-the status and the times that the servers record for it:
-
-- `name`: the node's name, which is its key in the registry.
-- `id`: the node ID, the UUID its client keeps in its data directory. A node
-  registered before node IDs existed, in an older log entry or snapshot or by an
-  older client, has none.
-- `address`, `datacenter`, and `region`.
-- `metadata`: free-form text entries. The client's version is the entry
-  `qraft.version`, and the identifier of the node's current registration is
-  the entry `qraft.registrationId`.
-- `status`: `registering`, `healthy`, or `unreachable`. Only the servers set it.
-- `registrationTime` and `lastHeartbeat`: stamped by the receiving server. The
-  node's last contact is its last heartbeat, or its registration time before
-  the first one.
-
-A node has no host name and no port: a port belongs to a service instance.
-
-A client keeps its node in `client.dataDirectory`, as decision 8 of the client
-task list sets out:
-
-- The client locks `client.lock` in the directory before it opens a thread, an
-  HTTP client or a listener, and holds the lock until its shutdown completes.
-  A directory belongs to one client at a time; a second client, in the same
-  process or another, is refused at its start.
-- The node ID is a UUID generated at the first start and kept in `node-id`
-  (written atomically and forced to disk, as a server's `server-id` is). A
-  restart keeps it. A wiped directory gives a new node. A `node-id` that cannot
-  be read stops the start and is never replaced.
-- The node's name is `client.nodeName`, the machine's host name by default.
-
-The servers keep the node ID with the node and use it to decide who may hold a
-name, by Consul's catalog rules (`ensureNodeTxn` and
-`ensureNoNodeWithSimilarNameTxn` in Consul's state store), checked against them
-on 2026-10-29. Each rule is decided when the registration is applied, from the
-replicated state alone, so every replica decides the same:
-
-- Names conflict regardless of case: `Web-1` and `web-1` are one name. A name is
-  stored as it was given.
-- A node holds its name while it is `registering` or `healthy`. A registration
-  under a name that a node of another ID holds is refused with 409
-  `node_name_reserved`, and so is a registration without an ID under the name of
-  a node with one. A node that has not yet sent its first heartbeat keeps its
-  name, which is stricter than Consul, where a node without a Serf check can be
-  replaced.
-- Once the holder is `unreachable`, or reaped, the new ID takes the name. A
-  takeover removes the old node's services and checks in the same replicated
-  step. Consul leaves them to the new agent's anti-entropy, which deletes what
-  it did not register. Qraft's reconciler has done the same since 2026-10-30
-  (section 8.2), but only in its own tenant and namespace and not before its
-  first pass, so the server still removes them.
-- An old node that comes back after a takeover is another ID asking for a held
-  name, and is refused while the new holder holds it.
-- A registration with an ID that no node has claims a node without an ID, even
-  one that holds its name, and keeps its services and checks: it is that machine
-  after its upgrade. This is Consul's rule for a node without an ID.
-- The same ID under a new name, or under another spelling of its name, is a
-  rename, as in Consul: the node is removed under its old name with its services
-  and checks, and inserted under the new one in the same step. The client's
-  reconciler looks up each of its services on every pass and registers again
-  those that are absent. A rename into a name another node holds is refused,
-  even when that node has no ID; into an unreachable holder's name, it takes
-  that name over.
-- A service registration, a service deregistration, a check observation or a
-  node deregistration that carries an ID is refused when the node it names is
-  registered with another ID, so a node that lost its name cannot change what
-  the node now holding it registered. Heartbeats are already refused when they
-  name an earlier registration.
-
-A client refused with `node_name_reserved` logs the refusal and tries again
-after its registration backoff, so a host rebuilt with an empty directory takes
-its name over once its old node is unreachable. A client whose registration was
-superseded learns it from its next heartbeat (`registration_superseded`) and
-registers again the same way, so a node that lost its name to another takes it
-back once that one is unreachable, as Consul's agent keeps syncing. While its
-node is not registered, a client sends no service write, as Consul's agent syncs
-its node before its services; a service refused with `node_name_reserved` is sent
-again on the next pass, not suppressed as a refused definition.
-
-Client state also includes:
-
-- Tenant and namespace context.
-- Locally configured service definitions and health checks.
-
-### 7.4 Service definition
-
-A service definition is client-owned. It comes from the configuration file or from
-the local API (section 12.1.3). It contains:
-
-- Local service ID.
-- Service name.
-- Advertised address and port.
-- Tags and metadata.
-- Enabled state.
-- Optional health-check definitions.
-
-It does not contain authoritative health state or Raft indexes.
-
-### 7.5 Service instance
-
-A service instance is server-owned replicated state derived from a registration
-command. Its durable identity is:
-
-```text
-(tenantId, namespace, nodeId, serviceId)
-```
-
-Its discovery grouping key is:
-
-```text
-(tenantId, namespace, serviceName)
-```
-
-This permits two nodes to use the same local service ID without overwriting each
-other. Re-registering the same durable identity is an idempotent update.
-
-Stored instance data includes the definition fields plus current health,
-registration index, modification index, and optional deregistration deadline.
-
-Built on 2026-11-08 by [`task-list-catalog-indexes-2026-11-08.md`](../docs/archive/task-list-catalog-indexes-2026-11-08.md): the
-catalog keeps each instance's `createIndex`, the entry that registered it, and
-`modifyIndex`, the entry that last changed it, as Consul's `CreateIndex` and
-`ModifyIndex`; a registration that changes only the health it carries moves neither.
-Catalog, node-services and health reads answer both with each instance.
-
-### 7.6 Health
-
-Health is server-owned state based on observations reported by clients or produced
-by server-side checks. The target states are:
-
-- `UNKNOWN`: no valid observation has been accepted.
-- `PASSING`: all required checks pass.
-- `WARNING`: service is degraded but discoverable when policy permits.
-- `CRITICAL`: one or more required checks fail or expire.
-- `MAINTENANCE`: explicitly disabled for discovery.
-
-Health changes are separate Raft commands. Registration cannot claim an
-authoritative health result.
-
-## 8. Service registration and reconciliation
-
-### 8.1 Registration flow
-
-1. The client loads and validates all service definitions.
-2. The local API becomes live and reports not ready.
-3. The client selects a configured server seed.
-4. Each enabled definition is submitted as an idempotent registration request.
-5. The receiving server validates and proposes a Raft command.
-6. Success is returned only after the command is committed and applied.
-7. The client becomes ready after every required definition is registered and
-   server contact is sufficiently recent.
-
-Partial registration is retained. The client retries only missing or changed
-definitions and does not roll back successfully committed registrations.
-
-### 8.2 Reconciliation
-
-The client periodically reconciles its service definitions rather than relying on
-one startup request. Reconciliation repairs state after administrative deletion or
-interrupted communication.
-
-The definitions have one source (`LocalDefinitions`): the configuration file's and
-the local API's (section 12.1.3). The configuration file is read once, because
-runtime configuration reload is not yet implemented, but the local API changes the
-source while the client runs. A change runs a pass at once, as Consul's agent
-triggers a sync; a pass already running read the old definitions, so one more runs
-after it.
-
-Only one reconciliation may run at a time. A stable content fingerprint prevents
-unnecessary writes when the desired definition has not changed.
-
-Since 2026-10-30 a pass also removes what only the catalog knows, as Consul's
-anti-entropy does. It reads the node's services with
-`GET /v1/catalog/node-services/{nodeName}` and deregisters any in the client's
-tenant and namespace that its source does not want, whether or not this process
-registered them: a definition removed while the client was down, a deregistration
-accepted just before a crash, or a service something else registered on the node.
-A service in another tenant or namespace is left alone. When no server can answer
-the read, the pass goes on with what the process remembers. Nothing is read while
-the node is not registered.
-
-### 8.3 Server selection and retry
-
-Client configuration supplies an ordered, deduplicated list of server seed
-URIs. For an idempotent operation, the client may try each seed once in a cycle.
-
-Retryable outcomes include:
-
-- Connection refusal or reset.
-- Request timeout.
-- Server drain or temporary unavailability.
-- A response indicating that the contacted server cannot accept the write.
-- HTTP 429, 502, 503, or 504.
-
-Validation, authorization, and semantic conflict responses are not retried
-against every server. A failed node-registration cycle is retried with capped
-exponential backoff and jitter. Periodic service reconciliation stays on the
-configured heartbeat cadence; retryable operations still rotate through the seed
-list within each pass. The last successful endpoint is preferred for the next
-operation, irrespective of whether it is a leader or follower.
-
-### 8.4 Deregistration
-
-Deregistration is node-scoped and idempotent. Removing an absent instance is a
-successful no-op. During graceful shutdown, the client:
-
-1. Marks itself unready.
-2. Stops local checks and health publications, then waits for in-flight
-   publications to finish, and stops new reconciliation.
-3. Attempts bounded deregistration for its known registered services.
-4. Deregisters its node after the service attempts complete. The node's
-   deregistration removes any service that an attempt left behind (section
-   12.1.2).
-5. Stops the local HTTP server.
-6. Closes its scheduler and HTTP resources.
-
-`PUT /v1/client/leave` runs the same sequence, answering between steps 4 and 5
-(section 12.1.3). Repeated and concurrent shutdown calls share one completion. The entire sequence
-is bounded by the positive `client.shutdownTimeoutMs` file setting, which defaults
-to 30 seconds. Deadline expiry force-cancels outstanding HTTP work and logs one
-incomplete-cleanup warning; it does not delay process termination indefinitely.
-
-Automatic expiry remains necessary because graceful shutdown cannot be guaranteed.
-
-## 9. Health checks and failure detection
-
-Clients execute checks close to the workload and report observations. Initial
-check types are:
-
-- TTL renewal.
-- HTTP request.
-- TCP connection.
-- Process-local status supplied through a client API.
-
-Each observation contains tenant, namespace, node, service, check ID, status,
-sequence number, observed time, and optional diagnostic output. Servers reject
-stale sequence numbers. Server time determines expiry deadlines so client clock
-skew cannot indefinitely preserve a registration.
-
-TTL expiry and automatic deregistration must be deterministic. A leader evaluates
-deadlines and proposes explicit replicated expiration commands; followers do not
-mutate catalog state from local timers.
-
-### 9.1 Leader-owned expiry
-
-`LeaderHealthExpiry` runs only while its server is the Raft leader. It evaluates
-on gaining leadership, then at the sooner of `server.health.expiryIntervalMs`
-(default 1000) and the next due instant. Losing leadership cancels evaluation and
-forgets in-flight proposals, and completions from an earlier term are ignored. A
-due command is not proposed again while it is in flight. Each proposal times out
-after five seconds so a lost proposal is re-evaluated.
-
-The side-effect-free `HealthExpiryEvaluator` applies these rules:
-
-- **Grace after failover.** Clients cannot renew while there is no leader, and
-  servers' clocks may differ. A check is therefore due only at the later of its
-  stored deadline and the current leader's acquisition time plus the check's TTL.
-  A failover never mass-expires checks, and a leader whose clock runs ahead still
-  waits a full TTL.
-- **Exact identity.** Every command names the stored sequence number and
-  deadline. A renewal committed first turns the expiry into a no-op, and an
-  expiry committed first is superseded by the renewal.
-- **Two phases.** An unrenewed check is first marked expired, which makes a
-  required check critical. If its latest observation carries a positive
-  `deregisterAfterMillis`, the leader deregisters the instance that long after
-  the effective deadline; zero means never. The state machine accepts a
-  deregistering command only for a check that is already expired.
-- **Saturation.** Deadlines beyond the representable time range never fall due.
-
-Deregistration removes the instance, its checks, and its declared check set. An
-client that is still alive re-registers the instance through reconciliation.
-
-### 9.2 Node membership expiry
-
-The same leader-only component expires silent nodes under a server-wide policy:
-`server.health.nodeTtlMs` (default 90000) and `server.health.nodeReapAfterMs`
-(default 259200000, 72 hours, Consul's reconnect window; 0 never reaps). Node registration and heartbeat times are
-stamped with the receiving server's clock; a client sends no time of its own. All replicated client command times are stored in milliseconds, so the
-leader and its followers hold identical values that expiry can match exactly.
-
-- A node's last contact is its last heartbeat, or its registration time before
-  its first heartbeat. It is due at the later of `lastContact + nodeTtlMs` and
-  `leaderSince + nodeTtlMs`, the same failover grace used for checks.
-- The first phase marks the node `UNREACHABLE`. A later heartbeat restores it to
-  `HEALTHY`.
-- With a positive reap delay, an unreachable node is reaped that long after its
-  effective deadline. Reaping removes the node entry and every service instance
-  whose node is that node, in every tenant and namespace, together with their
-  checks and declared check sets. This removes the services of a crashed client
-  even when they have no checks. A node's deregistration removes the same
-  (section 12.1.2).
-- Both phases name the stored last contact, so a heartbeat or re-registration
-  committed first makes a stale command a no-op. Reaping applies only to a node
-  that is already unreachable.
-- **An unreachable node's services leave `?passing`** (section 12.1.1). A check keeps
-  its last result until its TTL lapses, and `ttlMs` has no upper limit, so its check
-  alone could keep a service passing long after its node stopped. Consul excludes such
-  a service, because a failed node's critical `serfHealth` check counts among its
-  checks. Qraft decides the same at the read, from the replicated node status, so every
-  server answers alike. Check results and an instance's stored health do not change,
-  and a returning heartbeat restores the instance with no new observation. A client cut
-  off from the servers has its services leave `?passing` after `nodeTtlMs`, though they
-  may still be running, as Consul's failure detector does; the grace after failover
-  stops a change of leader from dropping them.
-- A node command differing only in its proposal time is the same in-flight
-  expiry and is not proposed twice.
-
-Discovery returns all states by default only where the API contract says so. A
-healthy-service query filters to eligible states without mutating the catalog.
-
-## 10. Distributed key/value state
-
-Key/value entries are scoped by tenant and namespace and contain:
-
-- Key and opaque value.
-- Creation and modification indexes.
-- Optional flags.
-- Optional owning session.
-
-Writes, deletes, compare-and-set operations, acquire, and release are Raft
-commands. Prefix listing is deterministic. Blocking queries wait for an index
-strictly greater than the caller's observed index and terminate on timeout,
-shutdown, or leadership/consistency failure.
-
-Built on 2026-11-08 by [`task-list-key-value-2026-11-08.md`](../docs/archive/task-list-key-value-2026-11-08.md), on Consul's
-KV store, except sessions, acquire, release and blocking queries, which followed the same day with the consistency
-list (section 13) and the sessions list (section 11):
-
-- **State** (`state.kv.KvState`): entries by tenant, namespace and key, with an
-  opaque value, 64-bit flags, and creation and modification indexes, which are the
-  Raft indexes of the commands that wrote them. The store takes the entry being
-  applied at the last applied index plus one, since `RaftNode` applies entries in
-  order and gives each index after its entry. A set or delete with a
-  compare-and-set index applies only at the entry's modification index, or for 0
-  only to an absent key; deleting an absent key succeeds. The snapshot carries the
-  entries, and one written before key/value restores none. The older `metadata`
-  map and the gRPC `DistributedStateService` stay as they were.
-- **HTTP** (`/v1/kv/{key}` on the server and the client): `GET` with `recurse`,
-  `keys`, `separator` and `raw`; `PUT` with `flags` and `cas`; `DELETE` with
-  `recurse` and `cas`; answers in Consul's field names; `X-Qraft-Index` is the
-  key/value state's last index. The scope is the request's `X-Qraft-Tenant` and
-  `X-Qraft-Namespace` headers. Other parameters are refused. Since 2026-11-08 a
-  follower forwards a write to the leader (section 13); one with no reachable
-  leader answers 503 `leader_unavailable`, and the client forwards to its next
-  server only a write that cannot have been applied.
-- **ACLs**: `key` and `key_prefix` rules, scoped as `service` rules are; a read
-  needs `key:read`, a recursive read leaves out what the token cannot read, a write
-  needs `key:write`, and a recursive delete needs write on every key under the
-  prefix, decided on the rules as Consul's `KeyWritePrefix` decides it. There is no
-  `list` access.
-- **`qraft kv`** `get`, `put` and `delete`, with Consul's messages.
-
-## 11. Sessions and locks
-
-A session binds an owner identity to a TTL and optional behavior on expiry.
-Session creation, renewal, destruction, and expiration are replicated.
-
-Lock acquisition is a conditional KV mutation tied to a live session. Release is
-accepted only from the owning session. Expiration is represented by an explicit
-Raft command so every server observes the same ordering between renewals and
-expiry.
-
-Leader-election helpers are library behavior built on sessions and locks rather
-than a separate consensus mechanism.
-
-Built on 2026-11-08 by [`task-list-sessions-and-locks-2026-11-08.md`](../docs/archive/task-list-sessions-and-locks-2026-11-08.md), on
-Consul's sessions:
-
-- **State** (`state.session`): sessions by ID, each bound to a registered node,
-  with a name, a behaviour (`release` or `delete`), an optional TTL, a lock delay
-  and the index that created it. Creating and destroying are Raft commands, and so
-  is a lapse, as a destroy stamped with the leader's time. A renewal is not
-  replicated, as in Consul: the leader keeps the TTL timers in memory, and a new
-  leader gives every session twice its TTL again. This differs from the paragraph
-  above, which has renewal replicated.
-- **Invalidation**: a session ends when it is destroyed, when twice its TTL passes
-  without a renewal, or when its node becomes unreachable, is reaped, deregistered
-  or replaced. Its keys are then released or deleted by its behaviour, and none can
-  be acquired again until its lock delay, counted from the invalidation's time, has
-  passed. The times come from the proposer, so every replica keeps the same delay.
-- **Locks**: `PUT /v1/kv/{key}?acquire={session}` sets the key and its session if
-  no other session holds it and its lock delay has passed. A new holder increments
-  `LockIndex`. `?release={session}` frees a key only for the session that holds it.
-- **HTTP**: `/v1/session/create`, `destroy`, `renew`, `info`, `node` and `list` on
-  the server, in Consul's form. The server requires `Node`, and a client's local API
-  binds a session without one to the client's node.
-- **ACLs**: `session` and `session_prefix` rules name a node. Creating, renewing or
-  destroying needs `session:write` on the node, reading `session:read`, and
-  acquiring or releasing `key:write`.
-- **Leader election** is the recipe in `RAFT_STORAGE_OPERATIONS.md`, "Sessions and
-  locks", on the local API, and since 2026-11-08 the client library's
-  `LeaderElection`; there is no helper command.
-- **For the administrative interface** (2026-11-17, UI-6's
-  [`task-list-admin-ui-sessions-locks-watches-2026-11-17.md`](../docs/archive/task-list-admin-ui-sessions-locks-watches-2026-11-17.md)):
-  a destroy carries its cause, so `session.destroyed` and the invalidation metric
-  say `ttl` for a lapse, where both said `destroyed`; the event query takes
-  `session`; `GET /v1/internal/ui/sessions` adds the leader's `RenewedAt` and
-  `ExpiresAt` to each session, which a follower answers as unknown; and
-  `GET /v1/internal/ui/locks` answers the held keys across scopes and the lock
-  delays still running, filtered by `key:read`. Consul has neither read.
-
-The client library, built on 2026-11-08 by
-[`task-list-client-library-2026-11-08.md`](../docs/archive/task-list-client-library-2026-11-08.md),
-is `dev.mars.qraft.client.api`, Consul's Go `api` package for Java applications:
-
-- **`QraftApi`**: the local API's address (`http://127.0.0.1:8080` by default) or a
-  server's, a token sent as `X-Qraft-Token`, and a tenant and namespace sent as the
-  scope headers. Its calls are synchronous; a refusal throws `QraftApiException`
-  with the status, the server's error code and its message.
-- **`KeyValue`**: `get`, `list`, `keys`, `put` with flags, `cas`, `acquire`,
-  `release`, `delete` and `deleteTree`, with `QueryOptions` for a blocking read past
-  an index and for the consistency; a read answers its `X-Qraft-Index`.
-- **`Sessions`**: `create` with `SessionOptions`, `renew`, which answers false for a
-  session that is gone, `destroy` and `info`.
-- **`LeaderElection`**: a contender's session, the acquisition, blocking reads of
-  the key while another holds it, renewal every half TTL while it leads, consistent
-  reads that check it still holds the key, and a
-  listener told when leadership is gained and lost. A lost renewal, a key no longer
-  held by its session, or a failed call while it leads ends its leadership, and it
-  campaigns again with a new session; `close()` releases the key and destroys the
-  session.
-
-## 12. API design
-
-### 12.1 Service endpoints
-
-Initial HTTP endpoints are:
-
-```text
-PUT /v1/catalog/register
-PUT /v1/catalog/deregister
-PUT /v1/catalog/check/observe
-PUT /v1/catalog/node/heartbeat
-GET /v1/catalog/nodes
-GET /v1/catalog/node-services/{nodeName}
-GET /v1/catalog/services
-GET /v1/catalog/service/{serviceName}
-GET /v1/health/service/{serviceName}
-GET /v1/internal/ui/services
-GET /v1/health/state/{state}
-```
-
-HTTP request DTOs map explicitly to commands. They may accept documented field
-aliases for client compatibility, but responses use one stable Qraft schema.
-Internal fields such as Raft indexes and authoritative health cannot be set by a
-registration request.
-
-The discovery reads take no query parameter, except `passing` on the health route. Any
-other answers 400 `invalid_query`, naming the parameter (since 2026-11-01). Consul's
-handlers read the parameters they know and ignore the rest (`agent/http.go`, read
-2026-11-01). Here an ignored parameter would answer another question than the one
-asked: `?tag=blue` would list every instance, and `?stale` would suggest a choice of
-consistency that does not exist.
-
-Registration identity is supplied through interim request-context headers:
-
-```text
-X-Qraft-Node: required
-X-Qraft-Node-ID: optional; the node ID, a canonical lower-case UUID
-X-Qraft-Tenant: optional; defaults to default
-X-Qraft-Namespace: optional; defaults to default
-```
-
-Every request has an ID: the one its `X-Request-Id` header gives, or a new one.
-The answer carries it back, and it is the `requestId` of the error envelope and
-of the logs written while the request is handled. A request body longer than
-512 KiB is refused with 413 `request_too_large` before the route runs, whether
-or not it declares its length, as Consul limits its request bodies to 512 KiB
-(since 2026-10-30). The client's local API shares this handling (section 16).
-
-A client sends its node ID on every request (since 2026-10-30); a client from
-before node IDs sends none and is served as before. A value that is not a
-canonical UUID is refused with 400. A registration, a deregistration or an
-observation that carries an ID is refused with 409 `node_name_reserved` when the
-node it names is registered with another ID (section 7.3).
-
-A service is registered under `service` in the body of `PUT /v1/catalog/register`,
-beside or instead of `node` (section 12.1.2). The service's own body is:
-
-```json
-{
-  "serviceId": "web",
-  "serviceName": "frontend",
-  "address": "127.0.0.1",
-  "port": 8080,
-  "tags": ["blue"],
-  "metadata": {"team": "platform"},
-  "datacenter": "dc-1",
-  "region": "eu-west",
-  "enabled": true,
-  "checks": ["http", "tcp"]
-}
-```
-
-`tags` and `metadata` default to empty collections, while `datacenter` and
-`region` default to empty strings. `checks` optionally declares the check IDs the
-client will publish for this instance. A registration that declares checks prunes
-any replicated check not in the list and makes the server reject later
-observations for undeclared checks; an empty list declares that there are none.
-Omitting `checks`, as older clients do, keeps the existing checks and accepts any
-check ID. The client always declares the checks configured for the service. Unknown fields are rejected with
-`invalid_registration`. For one compatibility window only, a `health` field is
-recognized but ignored; the stored health is always initialized to `UNKNOWN`.
-No aliases are currently accepted.
-
-A successful registration names the node and, under `service`, returns only the stable
-protocol fields. `registered` appears at the top level only when the body also
-registered the node:
-
-```json
-{
-  "node": "node-a",
-  "service": {
-    "serviceId": "web",
-    "serviceName": "frontend",
-    "nodeId": "node-a",
-    "tenantId": "default",
-    "namespace": "default",
-    "registered": true
-  }
-}
-```
-
-A registration the replicated catalog does not accept answers 409
-`registration_rejected` in the error envelope; a success-shaped body is never
-returned for a failure.
-
-A service is removed with `PUT /v1/catalog/deregister` and the body
-`{"serviceId":"web"}`, which uses the same three identity headers. It is idempotent
-and returns HTTP 200 with `{"node":"node-a","serviceId":"web","deregistered":false}`
-when the composite instance is already absent.
-
-`GET /v1/catalog/node-services/{nodeName}` returns one node's registrations in the
-read's tenant and namespace, as Consul's route of that name does, and carries
-`X-Qraft-Index`. An unknown node has an empty array, with HTTP 200. A missing name
-answers 400 `node_name_required`. The client's anti-entropy reads it (section 8.2).
-
-A name in the path of this route, of `GET /v1/catalog/service/{name}`, or of
-`GET /v1/health/service/{name}` is everything after the route's prefix, decoded once, as
-in Consul. It may contain a slash, raw or encoded.
-
-#### 12.1.1 Health observations and health discovery
-
-Clients report check results and TTL renewals with
-`PUT /v1/catalog/check/observe`, using the same identity headers as registration.
-A renewal is simply a newer observation of the same check. The body is:
-
-```json
-{
-  "serviceId": "web",
-  "checkId": "http",
-  "status": "passing",
-  "sequenceNumber": 7,
-  "observedAt": "2026-09-26T09:59:59Z",
-  "ttlMillis": 30000,
-  "required": true,
-  "output": "200 OK",
-  "deregisterAfterMillis": 120000
-}
-```
-
-`status` is `passing`, `warning`, `critical`, or `maintenance`
-(case-insensitive); `UNKNOWN` is server-derived and cannot be reported.
-`sequenceNumber` and `ttlMillis` must be positive, `observedAt` is an ISO-8601
-UTC instant, `required` defaults to `true`, and `output` is optional and limited
-to 4096 characters. `deregisterAfterMillis` is optional, must not be negative,
-and defaults to zero, meaning the service is never deregistered automatically
-(section 9.1). Unknown fields and any other validation failure return
-`invalid_observation`.
-
-The receiving server stamps the command with its own receipt time, and the
-deadline is that receipt time plus `ttlMillis`; the client clock never determines
-expiry. Success is returned only after the observation is committed and applied:
-
-```json
-{
-  "serviceId": "web",
-  "checkId": "http",
-  "nodeId": "node-a",
-  "tenantId": "default",
-  "namespace": "default",
-  "sequenceNumber": 7,
-  "status": "PASSING",
-  "deadline": "2026-09-26T10:00:30Z",
-  "accepted": true
-}
-```
-
-The response carries `X-Qraft-Index`, which is at least the index that applied the
-observation. Other outcomes are:
-
-- An exact replay of the accepted observation returns the same 200 body with the
-  original deadline, so a retry after an unknown outcome is safe.
-- An older sequence, or the same sequence with different content, returns HTTP
-  409 `stale_observation` with `currentSequenceNumber`, and state is unchanged.
-- An observation for a composite instance that is not registered returns HTTP 404
-  `service_not_found`.
-- An observation for a check that the instance's registration does not declare
-  returns HTTP 404 `check_not_declared` with `checkId`. The client retries both 404
-  outcomes, because either can be caused by its own re-registration not having
-  committed yet.
-
-`GET /v1/health/service/{serviceName}` returns every instance of the service in
-deterministic identity order, whatever its health. Each entry pairs the stored
-registration with its replicated checks ordered by check ID and its node's status,
-`registering`, `healthy` or `unreachable`, null if the node has no entry:
-
-```json
-[
-  {
-    "service": {"serviceId": "web", "health": "PASSING", "...": "..."},
-    "checks": [
-      {
-        "checkId": "http",
-        "status": "PASSING",
-        "required": true,
-        "sequenceNumber": 7,
-        "observedAt": "2026-09-26T09:59:59Z",
-        "acceptedAt": "2026-09-26T10:00:00Z",
-        "deadline": "2026-09-26T10:00:30Z",
-        "expired": false,
-        "output": "200 OK",
-        "deregisterAfterMillis": 120000
-      }
-    ],
-    "nodeStatus": "healthy"
-  }
-]
-```
-
-`?passing` or `?passing=true` restricts the result to instances whose aggregate
-health is `PASSING` and whose node is not `unreachable` (section 9.2). An instance
-whose node has no entry is decided by its checks. `passing=false` is the unfiltered
-default. Any other query parameter or value returns `invalid_query`. Health reads
-never mutate the catalog. `GET /v1/catalog/service/{serviceName}` continues to return
-bare registrations, so it lists an unreachable node's instance until the node is reaped.
-
-`GET /v1/internal/ui/services`, Consul's name (since 2026-11-14, for the administrative
-interface's Services list), summarises each service in the read's scope in one read,
-where the catalog's reads would need one request per service. It answers the
-services the token may read, in name order, each with what is known of the instances
-the token may read, which need `node:read` and `service:read` as on the health read:
-
-```json
-[
-  {
-    "name": "web",
-    "tenantId": "default",
-    "namespace": "default",
-    "tags": ["v1", "v2"],
-    "instanceCount": 2,
-    "health": {"unknown": 0, "passing": 1, "warning": 0, "critical": 1, "maintenance": 0},
-    "datacenters": ["dc-1", "dc-2"],
-    "regions": ["eu-west"],
-    "modifyIndex": 41
-  }
-]
-```
-
-`health` counts the instances by their aggregate health, and `modifyIndex` is the
-highest among them, the service's last change. It takes the read options of every
-catalog read and no other parameter, and is marked
-`X-Qraft-Results-Filtered-By-ACLs` when a service or an instance was left out.
-
-`GET /v1/health/state/{state}`, Consul's name (since 2026-11-14, for the interface's
-Health Checks page), lists the accepted checks across the services of the read's
-scope: in `state`, one of `unknown`, `passing`, `warning`, `critical` and
-`maintenance`, or all of them for `any`; any other state is 400 `invalid_state`. A
-check is listed when its instance could be read, ordered by service name, instance
-and check. Each entry is the check as on the health read, with its instance's
-`serviceId`, `serviceName`, `nodeId`, the node's `nodeStatus` (null if the node has no
-entry), `tenantId` and `namespace`. A declared check with no accepted observation has
-no state and is not listed. Read options, refusals and the filtered header are as on
-the summary.
-
-These reads, like the rest, name five health states. `FAILING`, kept only so an older
-snapshot loads, is counted as `CRITICAL`, as the aggregate of an instance's checks
-counts it; no observation can carry it.
-
-A path no route serves is answered 404 `not_found` in the error envelope (section
-12.2), after the request's body is read (since 2026-11-14). The JDK server answers such
-a path itself, as HTML, and closes the connection with the body unread: a reset, which
-can discard the answer before the client reads it. The client's local API answers an
-unrouted path the same way (since 2026-11-14).
-
-#### 12.1.2 Nodes
-
-A client registers, renews, and removes its node on the catalog's write paths,
-which are named after Consul's. The node is named by `X-Qraft-Node`, as the
-node of a service is; a body never names it. The tenant and namespace headers
-are read by the same rules, although a node belongs to no tenant or namespace.
-A node route takes no path parameter: a longer path answers 404 `not_found`.
-
-**One body for nodes and services.** `PUT /v1/catalog/register` and
-`PUT /v1/catalog/deregister` serve nodes and services (services since 2026-10-26).
-Their bodies were fixed for both when the node routes arrived, so that adding
-services changed nothing that a node sends. A registration is:
-
-```json
-{
-  "node": {
-    "address": "10.0.0.5",
-    "datacenter": "dc-1",
-    "region": "eu-west",
-    "metadata": {"qraft.version": "1.0.0", "qraft.registrationId": "..."}
-  }
-}
-```
-
-- `node` describes the node. Each of its fields is optional, and `metadata`
-  defaults to none. It cannot carry the node's name, its status, or its times.
-- A service is registered under a second key, `service`, beside `node`, holding
-  the body of a service registration (section 12.1). The body must hold at least
-  one of the two; one that holds neither answers 400 `invalid_registration`, "node
-  or service is required".
-- The whole body is checked before anything is replicated, so a body that cannot
-  be accepted registers neither half. When it holds both, the node is committed
-  first, then the service. A service the catalog rejects after the node was
-  registered answers 409 `registration_rejected`; the node stays registered, and
-  the client's retry repeats both idempotently.
-- Unknown fields are rejected with `invalid_registration`, at both levels.
-
-A registration replaces the node's description, makes the node `registering`,
-and stamps its registration time. The node's ID comes from `X-Qraft-Node-ID`. A
-name that a node of another ID holds is refused, by the rules of section 7.3,
-with 409 and nothing in the body registered:
-
-```json
-{"code": "node_name_reserved", "error": "node_name_reserved",
- "message": "Node name web-01 is reserved by node 1b4e28ba-... with name web-01",
- "retryable": false, "requestId": "...", "node": "web-01",
- "holder": {"name": "web-01", "id": "1b4e28ba-..."}}
-```
-
-The message follows Consul's ("Node name %s is reserved by node %s with name
-%s"); a holder without an ID is "a node without an ID". It is not retryable at
-another server, which would answer the same, but the client tries again later,
-as Consul's agent keeps syncing: the name is free once its holder is
-unreachable. `GET /v1/catalog/nodes` lists each node's `id` after its `name`,
-`null` for a node without one.
-
-A body that holds only a node answers 200:
-
-```json
-{"node": "web-01", "registered": true}
-```
-
-A body that holds a service adds `service` with the service's answer (section
-12.1); a body that holds only a service has no `registered` at the top level,
-because no node was registered.
-
-Deregistration follows Consul's rule: a body that names no service removes the
-node itself. For a node the body is the empty object, `{}`.
-
-- A service is removed with `{"serviceId": "web"}`, which keeps the node and
-  answers `{"node":"web-01","serviceId":"web","deregistered":true}`. Any other field
-  is refused with `invalid_deregistration`. The field must hold a non-blank
-  string, so that a missing or blank value cannot remove the node instead.
-- It is idempotent, and answers 200 with
-  `{"node":"web-01","deregistered":false}` when the node is already absent.
-- As in Consul, it removes the node's entry and every service and check
-  registered on the node, in every tenant and namespace, in the same
-  replicated step (decided 2026-10-09). A client still deregisters its
-  services first; if one of those attempts fails, the node's deregistration
-  leaves nothing behind.
-- Services registered under the name of a node that has no entry are removed
-  too. The answer is still `deregistered: false`, because it reports the
-  node's entry.
-
-A heartbeat is sent to `PUT /v1/catalog/node/heartbeat`:
-
-```json
-{"sequenceNumber": 7, "registrationId": "..."}
-```
-
-- Both fields are optional. A positive `sequenceNumber` must be greater than
-  the last one accepted for the node; zero or absent is unsequenced. A
-  `registrationId` must be the `qraft.registrationId` the node was registered
-  with.
-- A heartbeat carries no status and no time. It makes a `registering` or an
-  `unreachable` node `healthy`, and the receiving server's clock gives the
-  node's last contact. Unknown fields are rejected with `invalid_heartbeat`.
-- It answers 200 with `{"node":"web-01","accepted":true}`.
-- A node that is not registered answers 404 `node_not_found` with `node`, and
-  the client registers again.
-- An older sequence of the node's registration answers 409 `stale_heartbeat`
-  with `node` and `sequenceNumber`, and state is unchanged.
-- A heartbeat of another registration than the node's, one that a later
-  registration of the name replaced, a takeover among them, answers 409
-  `registration_superseded` with `node` (since 2026-10-30), and state is
-  unchanged. The client registers again, and is refused while another node
-  holds the name. The current registration is not revealed: it is what a
-  heartbeat must name.
-
-`GET /v1/catalog/nodes` returns every node in name order and carries
-`X-Qraft-Index`:
-
-```json
-[
-  {
-    "name": "web-01",
-    "address": "10.0.0.5",
-    "datacenter": "dc-1",
-    "region": "eu-west",
-    "metadata": {"qraft.version": "1.0.0", "qraft.registrationId": "..."},
-    "status": "healthy",
-    "registrationTime": "2026-09-26T10:00:00Z",
-    "lastHeartbeat": "2026-09-26T10:00:05Z"
-  }
-]
-```
-
-`lastHeartbeat` is `null` before the first heartbeat.
-
-The client accepts a 2xx answer of a node write as a success only when it
-names the node and carries the outcome field. Anything else is the retryable
-`invalid_response`, as it is for a service, so that an answer some other HTTP
-service could give never registers a node.
-
-#### 12.1.3 The client's local API
-
-A client serves these routes to the applications on its host, after Consul's agent
-API (`agent/agent_endpoint.go`, read 2026-10-31), with the request handling of
-section 12.1 and the bind address of section 16:
-
-```text
-PUT /v1/client/service/register[?replace-existing-checks]
-PUT /v1/client/service/deregister/{serviceId}
-GET /v1/client/services
-GET /v1/client/service/{serviceId}
-PUT /v1/client/check/register
-PUT /v1/client/check/deregister/{checkId}
-GET /v1/client/checks
-PUT /v1/client/check/pass/{checkId}[?note=...]
-PUT /v1/client/check/warn/{checkId}[?note=...]
-PUT /v1/client/check/fail/{checkId}[?note=...]
-PUT /v1/client/check/update/{checkId}
-PUT /v1/client/maintenance?enable=...[&reason=...]
-PUT /v1/client/service/maintenance/{serviceId}?enable=...[&reason=...]
-GET /v1/client/self
-GET /v1/client/members
-PUT /v1/client/leave
-GET /v1/catalog/services
-GET /v1/catalog/service/{name}
-GET /v1/catalog/nodes
-GET /v1/health/service/{name}[?passing]
-```
-
-A service registration takes the fields of a service in the configuration file
-(section 16), without `enabled`. `id` defaults to `name`, and `address` to the
-client's, as in Consul:
-
-```json
-{
-  "id": "web-1", "name": "web", "port": 9000,
-  "tags": ["v1"], "metadata": {"team": "platform"},
-  "checks": [{"id": "app", "type": "ttl", "ttlMs": 15000}]
-}
-```
-
-It answers 200 with `{"serviceId":"web-1"}`. The service's other checks stay,
-unless `replace-existing-checks` is given with no value or `true`. A check
-registered alone takes the fields of a check and names its service in `serviceId`,
-and answers `{"checkId":"app","serviceId":"web-1"}`. A check ID is unique on a
-client, so registering it for another service moves it.
-
-- A malformed or invalid body answers 400 `invalid_registration`.
-- A check for a service that is not registered, and a read of one, answer 404
-  `service_not_found`, as in Consul.
-- Removing a service or check that is not registered is not an error, as in Consul:
-  it answers 200 with `deregistered` false, and true otherwise.
-- A change that cannot be kept is logged as an ERROR with its cause and answers 500
-  `registration_not_kept`, retryable, and nothing has changed.
-
-`GET /v1/client/services` and `GET /v1/client/checks` return an object keyed by ID,
-in the form kept on disk. A check carries `status`, `output` and `observedAt` once
-it has reported. A service disabled in the configuration file is not registered,
-so these do not show it.
-
-A write answers once the change is kept and has taken effect locally: its checks
-run, and readiness counts them. The servers learn of it from the reconciler (section
-8.2), as Consul's agent syncs after it answers. A check's first observation can
-reach a server before its service does; the client retries it (section 12.1.1).
-
-The rules for an ID are Consul's. At run time the latest registration or
-deregistration wins, including for a service the configuration file defines. What
-the API registered is kept in `registrations.json` in `client.dataDirectory`,
-replaced atomically, and restored at startup. At startup the file's definitions are
-registered again and take precedence: a kept registration of the same ID is purged,
-and so is a kept check whose service is gone. A service the file defines and the API
-deregistered is therefore back after a restart. A `registrations.json` that cannot
-be read stops the client and is not replaced, where Consul logs such a file and goes
-on. These routes have no authentication until the ACL list.
-
-A TTL check is told its status by `pass`, `warn` and `fail`, or by `update` with a
-body of `status`, one of `passing`, `warning` or `critical`, and an optional `output`.
-Each answers `{"checkId":"app","status":"passing"}`. An unknown check answers 404
-`check_not_found`, a check that is not a TTL check 400 `check_not_ttl`, an invalid
-update 400 `invalid_request`, and a check that is not running yet, before the node
-registers, 503 `check_not_running`, retryable. A status is not kept across a restart,
-where Consul keeps it until it would have expired.
-
-Maintenance takes a service out of `?passing` discovery while it stays registered.
-`enable` is required, read as Go's `strconv.ParseBool` reads it, as in Consul, and
-anything else answers 400 `invalid_request`; `reason` is optional. A service that is
-not registered answers 404 `service_not_found`, whether enabling or disabling. They
-answer `{"serviceId":"web-1","maintenance":true}` and `{"maintenance":true}`.
-
-As in Consul, maintenance is a check of its own, kept across a restart, and enabling
-it again keeps the first reason. The client adds `_service_maintenance:{serviceId}`,
-or `_node_maintenance:{serviceId}` on each service of a node in maintenance, including
-services registered later, because a check always names a service. Applications may
-not use those IDs. The service declares the check, the check reports the server's
-`maintenance` status with the reason as its output, and `GET /v1/client/checks` shows
-it. A server treats any `maintenance` observation as maintenance of the service
-(section 7.6). So, unlike Consul's critical check, it is not required: it never holds
-the client's readiness back. It reports again every third of its 60 s TTL, because a
-service removed and registered again comes back without its checks' state. Disabling
-it stops the declaration, and the server prunes the check. Deregistering a service
-ends its maintenance.
-
-`GET /v1/client/self` answers with `node` (name, ID, address, datacenter, region),
-`version`, `config`, `serverContact` (`lastSuccessfulContact`, null until a server has
-answered) and `readiness` (`ready`, and each condition of section 4.3). `config` names
-its settings one by one, so a secret added later is not shown by default.
-
-`GET /v1/client/members` is a forwarded read of `GET /v1/catalog/nodes`, because Qraft
-has no gossip pool. The answer is passed on as it came, under the caller's request ID,
-with `X-Qraft-Index` and the leader hint. A busy server or one that cannot be reached
-is passed over for the next seed, and if all are, the last answer is passed on. With
-no answer at all it is 503 `no_server_reachable`, retryable, and never older data.
-Consul's `/v1/agent/members` lists its gossip pool, and Consul itself points to
-`/v1/catalog/nodes` for a strongly consistent list. So here there is no answer without a
-server, only clients are listed, because servers have no node entry, and a node that
-left is gone, where Consul shows it as `left`. Consul documents `wan` as for its
-server-mode agents and `segment` as Enterprise; neither is carried over, so the servers
-refuse `?wan=1` as they do any parameter they do not know (section 12.1).
-
-The four reads at `/v1/catalog/*` and `/v1/health/*` are forwarded in the same way, as
-Consul's agent serves them, so an application needs only its local client. Each reaches
-the servers with its path and query as the caller wrote them, so what a read means is
-decided in one place. A read's scope needs a rule of its own:
-
-- `X-Qraft-Tenant` and `X-Qraft-Namespace` go on as the caller sent them, each alone.
-- Without one, the read uses the client's own, because that is where this API registers
-  services: an application reads what it registered without naming a scope. A read
-  sent straight to a server without one uses `default` (section 12.1).
-- A value holding a control character, which the listener takes and the client sending
-  it on refuses, answers 400 `invalid_scope` without asking a server. A request ID that
-  does so answers 400 `invalid_request_id`, here and on `members`.
-
-Only `GET` is served; another method answers 405 without asking a server. Consul's agent
-also forwards catalog writes, and here applications write through `/v1/client/*`. These
-reads are served after shutdown begins, until the listener stops.
-
-`PUT /v1/client/leave` answers `{"deregistered":true}` once the client has left the
-catalog (section 8.4), or false if it could not within its shutdown bound. It then
-finishes shutting down, and its process exits with code 0. A Consul client does the
-same: its `Client.Leave` logs a failed leave and returns no error, so `AgentLeave` goes
-on to shut down. A client that could not deregister is then treated as one that crashed
-(section 9): its checks expire, its node is marked unreachable after `nodeTtlMs`, and
-the catalog keeps both until `nodeReapAfterMs`. What the API registered stays in
-`client.dataDirectory`, as Consul's persisted services do. Consul treats a leave as "a
-permanent intent" and does not rejoin without an explicit join or `rejoin_after_leave`;
-a client always has its server URLs, so its next start registers it again.
-
-#### 12.1.4 DNS interface
-
-Since 2026-11-09 ([`task-list-dns-discovery-2026-11-09.md`](../docs/archive/task-list-dns-discovery-2026-11-09.md)), a server and
-a client each serve DNS when `server.dns` or `client.dns` gives a port, over UDP and TCP
-on that port, for the domain `qraft` unless `domain` names another. It answers the
-names of Consul's DNS interface:
-
-| Name | Records |
-| --- | --- |
-| `[tag.]<service>.service[.<namespace>.ns][.<tenant>.ap].<domain>` | A, AAAA and SRV of the instances |
-| `_<service>._<tag>.service[...].<domain>` (RFC 2782; `_tcp` means any tag) | SRV |
-| `<node>.node.<domain>` | A or AAAA of the node's address |
-| `<hex address>.addr.<domain>` | A or AAAA of the address the name spells |
-
-A lookup asks the same reads as HTTP: a server runs `GET /v1/health/service/{name}`
-and `GET /v1/catalog/nodes` on its own routes in memory, and a client forwards them to
-the servers as its local API does, so ACLs, tenancy and readiness mean in DNS what they
-mean in HTTP. A server reads under the token in `server.dns.tokenFile`, else none; a
-client under its default token. With no `ns` or `ap` label a server reads the `default`
-tenant and namespace and a client its own. An instance is answered when its health is
-passing, warning or unknown (no checks) and its node is not unreachable; `onlyPassing`
-leaves out a warning. An SRV record's target is the instance's `addr` name, with the
-address in the additional section, or the instance's host name when its address is one;
-A and AAAA answers hold only instances whose address is an IP address. Answers are
-shuffled and carry `ttlSeconds` (0 by default).
-
-A name in the domain that names nothing is NXDOMAIN, and one that names something
-without records of the type asked is answered with none, both with the domain's SOA.
-A name outside the domain is REFUSED: there are no recursors. A read the token may not
-make is REFUSED, and one that fails or finds no server is SERVFAIL. A UDP answer fits
-512 bytes, or the query's EDNS size up to 4,096, and is marked truncated when records
-are left out, so a resolver asks again over TCP. Prepared queries, recursors, a `dns`
-token kind and other datacenters are not offered.
-
-### 12.2 Error envelope
-
-Errors use a stable machine-readable envelope:
-
-```json
-{
-  "code": "leader_unavailable",
-  "message": "No server can currently accept the write",
-  "retryable": true,
-  "requestId": "..."
-}
-```
-
-Clients branch on `code` and `retryable`, never on human-readable messages.
-`X-Request-Id` is echoed when supplied and generated otherwise; the same value is
-used in request logging. The deprecated duplicate `error` property remains for
-one compatibility release and is scheduled for removal in the first release
-after 2026-12-31.
-
-The current `HttpCatalogClient` applies this contract for registration and
-deregistration. It treats parsed 2xx responses as success; transport failures,
-timeouts, HTTP 429/502/503/504, retryable envelopes, and malformed 5xx bodies as
-retryable; and non-retryable envelopes or malformed 4xx bodies as rejected. A
-returned `leaderId` is exposed as an outcome hint. The shared server transport
-rotates through ordered seeds on retryable outcomes and remembers the last
-successful endpoint. Failed node-registration cycles use capped exponential
-backoff with jitter; catalog operations are retried by the periodic reconciler on
-its normal heartbeat cadence.
-
-### 12.3 Index metadata
-
-Reads expose the applied state index in a response header. Blocking-query clients
-send their last observed index and a bounded wait duration. Indexes are monotonic
-for a given committed history and are not wall-clock timestamps.
-
-The current catalog read endpoints return the index as `X-Qraft-Index`.
-
-### 12.4 Built-in administrative capabilities
-
-The server provides a built-in administrative interface backed exclusively by
-the same authenticated, authorized APIs available to other clients. It must not
-read or mutate server implementation objects directly, and it must not
-introduce an alternate consistency or persistence path.
-
-The interface is part of the main executable artifact. Its static assets are
-embedded at build time and served by the server-mode process; it is not a
-separate module, service, container, installation, or deployment. Client mode
-does not start the administrative listener. Packaging the interface must not add
-domain logic to the entry point: the executable jar carries the assets, while
-the server code owns the HTTP routes, authentication, authorization, cache
-policy, and lifecycle of the serving endpoint.
-
-#### 12.4.1 Build and executable packaging
-
-The administrative frontend is compiled before the Java packaging phase into a
-static distribution containing `index.html`, hashed JavaScript and CSS bundles,
-fonts, images, and an asset manifest. The frontend source remains part of the
-project's one source tree rather than becoming an independently released Maven
-module. Tool versions and frontend dependencies are locked so a clean build is
-reproducible.
-
-Maven stages the completed distribution as generated resources under
-`META-INF/qraft/ui/`. The build's shade step then packages those resources,
-together with the classes, into the executable JAR, `target/qraft.jar`. A
-packaged server therefore contains everything required to serve the
-interface. The container image continues to contain the same runtime artifact
-and does not copy a separate web distribution into the image.
-
-The production server reads assets through `ClassLoader` resource streams. It
-must not convert resource URLs to `Path` or use `Files`, because resources inside
-the shaded JAR are ZIP entries rather than ordinary filesystem files. Assets are
-served by the existing JDK HTTP server and share its listener, TLS configuration,
-authentication boundary, request limits, and lifecycle:
-
-```text
-qraft.jar, the executable JAR
-|-- Java classes
-`-- META-INF/qraft/ui/
-    |-- index.html
-    |-- asset-manifest.json
-    `-- assets/<content-hashed files>
-
-server process
-|-- /v1/...   authenticated control-plane APIs
-`-- /ui/...   embedded administrative assets
-```
-
-Vite writes the manifest under that name when its build sets
-`build.manifest: 'asset-manifest.json'`; its default, with `true`, is
-`.vite/manifest.json`.
-
-The `/ui/` handler strips only the configured administrative path prefix before
-performing a classpath lookup. A read of `/` redirects, 302, to the administrative
-path when the interface is enabled (since 2026-11-14); with it disabled `/` is not
-found like any unrouted path. An unknown extensionless `GET` below `/ui/` falls back to
-`index.html` for client-side routing. Missing named assets return `404`; API,
-metrics, health, and debugging paths must never fall back to the frontend.
-Whether a last segment has an extension is read from the path as sent, before
-decoding, and the interface writes a dot in a route's name as `%2E`, so a view
-such as a service named `api.v2` is still a route; the decoded path is what is
-checked and looked up.
-
-At request time, the server renders a small non-cacheable `index.html` template
-with a safely JSON-encoded bootstrap object containing public runtime settings,
-such as the API base path, administrative content path, enabled feature flags,
-authentication mode, and the security profile proposed by
-[`task-list-acl-and-tokens-2026-11-07.md`](../docs/archive/task-list-acl-and-tokens-2026-11-07.md)
-(proposal 16). Secrets and bearer credentials are never included. The template
-also gains a `<base>` element naming the administrative path: the build links its
-assets relative to the page, because the path is configurable, and a client-side
-route below it must still resolve them below the path.
-Content-hashed assets are immutable and may receive long-lived cache headers;
-`index.html` and the asset manifest require revalidation so upgrades do not leave
-the browser pointing at removed bundles.
-
-Responses set an explicit content type, `X-Content-Type-Options: nosniff`, a
-restrictive content security policy, and the same configured security headers as
-the API server. The policy allows inline styles only with the request's nonce.
-Ant Design passes it to the styles it adds; a style that a library adds to the
-head without it, such as rc-util's scrollbar measurement, is given it by the
-interface, since only scripts from the server's own origin run on the page.
-Text assets (scripts, styles, JSON, SVG) are sent gzip to a request
-whose `Accept-Encoding` takes it, compressed once and kept in memory, with
-`Vary: Accept-Encoding` (since 2026-11-14); the uncompressed resource remains the
-canonical fallback, and the rendered index, made per request, is not compressed.
-The build splits the application from its libraries (React, Ant Design and its
-parts, zod) so that no script passes Vite's 500 kB warning.
-
-Production uses embedded resources exclusively. A filesystem resource directory
-may be supported as an explicit development-only override for rapid frontend
-iteration. Startup validation rejects a missing directory, an absent
-`index.html`, ambiguous embedded-plus-external configuration, or a content path
-that overlaps `/v1/`, health, metrics, or debugging endpoints.
-
-Disabling the interface prevents route registration but does not produce a
-different executable. This preserves one build artifact while allowing operators
-to reduce the exposed HTTP surface.
-
-The supported capabilities are:
-
-- inspect cluster membership, peer reachability, current leader, server role,
-  current term, commit index, applied index, and replication lag;
-- inspect storage and recovery state, including WAL size, snapshot boundary and
-  age, last successful snapshot, and reported persistence or recovery failures;
-- browse services by tenant, namespace, service name, node, tags, metadata, and
-  authoritative health state;
-- inspect service instances, their owning clients, configured checks, latest
-  observations, failure reasons, and registration or renewal status;
-- register, update, and deregister services when the authenticated principal has
-  permission, using the normal replicated command path;
-- inspect clients and nodes, including identity, metadata, advertised addresses,
-  owned services, last successful reconciliation, and liveness status;
-- browse key/value entries by tenant, namespace, and prefix, including creation
-  and modification indexes, flags, and session ownership;
-- create, compare-and-set, update, and delete key/value entries through normal
-  Raft-backed APIs, subject to authorization and value-redaction policy;
-- inspect, create, renew, and destroy sessions, and inspect lock ownership and
-  contention without bypassing session ownership rules;
-- inspect and administer tenants and namespaces, including enabled state,
-  policy assignments, and quotas where those features are supported;
-- inspect active configuration with secrets redacted and distinguish static
-  configuration from dynamically replicated state;
-- inspect health, metrics summaries, recent operational events, and audit
-  records using bounded queries that cannot create unbounded in-memory history;
-- expose explicit read-consistency selection and applied-index metadata for
-  administrative reads;
-- return structured leader hints, retryability, authorization failures, and
-  unknown-outcome errors for administrative mutations exactly as the public API
-  does.
-
-Administrative mutations are auditable and carry the authenticated principal,
-tenant, namespace, request ID, operation, target identity, result, and committed
-index where applicable. Secrets, raw credentials, sensitive health output, and
-protected key/value contents are never exposed without an explicit permission.
-
-This section defines capabilities only. Presentation layout, navigation,
-interaction patterns, and visual design are intentionally outside this document.
-
-
-### 12.5 Raft operator endpoints and commands
-
-After Consul's `/v1/operator/raft` and `consul operator raft`:
-
-```text
-GET    /v1/operator/raft/configuration
-DELETE /v1/operator/raft/peer?id={serverId} | ?name={name}
-```
-
-- **Listing.** `GET` lists each configured server: `serverId`, `name`,
-  `address`, `voter`, and `leader`, as this server holds them (Consul's
-  `?stale` read). With ACLs disabled it needs no token, like `/raft/status`;
-  with them enabled both need `operator:read` (section 15.1).
-- **Removal.** With ACLs disabled, `DELETE` needs the operator token
-  (`server.operator.token`); with them enabled, a token with `operator:write`,
-  as Consul's does (section 15.1). Either is sent as `X-Qraft-Token` or
-  `Authorization: Bearer`. Consul also binds its HTTP API to `127.0.0.1` by
-  default; Qraft does not. Any server takes the request and forwards it to the
-  leader over the Raft port, with the token, which the leader checks again in
-  its own state. The answers:
-  - `200`: removed.
-  - `400`: neither or both of `id` and `name`.
-  - `403` (`permission_denied`): the token is missing or wrong, none is
-    configured, or the token lacks `operator:write`; (`token_not_found`) with
-    ACLs enabled, the token names none.
-  - `404`: no configured server has that ID or name.
-  - `409` (`refused`): the change breaks a rule, such as the quorum rule or
-    another change in flight; the message gives the node's reason.
-  - `503` (`leader_unavailable`, retryable): no leader could be reached, or
-    the leader has not yet committed an entry in its term.
-
-The same operations from the command line, against any server's HTTP address:
-
-```text
-qraft operator raft list-peers  [--http-addr <host:port>]
-qraft operator raft remove-peer (--id <server-id> | --name <name>)
-                                [--http-addr <host:port>] (--token <t> | --token-file <path>)
-```
-
-The address defaults to `127.0.0.1:8080`. As everywhere in Qraft, nothing is
-read from environment variables; `--token-file` keeps the token out of the
-shell's history and the process list. The exit code is 0 when done, 1 when
-refused or unreachable, and 2 on misuse.
-
-## 13. Consistency model
-
-Every write is acknowledged after commit and state-machine application. Read modes
+Applications talk only to the client on their own host. Through it they register
+services and checks, report TTL status, read and write keys, hold sessions and locks,
+and discover other services. Servers are authoritative for committed cluster state;
+clients are authoritative only for their local observations, which they submit to the
+servers as commands.
+
+### 4.3 Server
+
+`qraft server` validates its configuration, opens durable storage, starts the Raft
+transport and node, and starts its public listeners: HTTP (with the administrative
+interface), the external gRPC API and, when configured, DNS. It takes part in the quorum
+and applies committed commands.
+
+Server mode owns:
+
+- Raft consensus, membership, snapshots and recovery (section 8, section 10);
+- the replicated state machine: catalog, health, key/value, sessions, tenancy and ACLs
+  (section 5);
+- leader-only background work: check and node expiry (section 7), session TTLs
+  (section 5.6), ACL token expiry and management-token installation (section 11);
+- the HTTP API, the external gRPC `DistributedStateService`, DNS, metrics and the
+  embedded administrative interface.
+
+A server is live while its process and HTTP listener run; `/health/live` is unaffected
+by every other condition. It is ready when it can serve its advertised behaviour:
+`/health/ready` answers 200 only when it is not draining, its Raft state can be read,
+it is not fenced, recovery has finished, it has not been removed from the
+configuration, and it knows a current leader (it leads, or follows one). Otherwise it
+answers 503 `not_ready` with a `conditions` list naming every failed condition:
+`draining`, `unavailable`, `fenced` or else `recovering`, `removed` and `no_leader`. The
+conditions are read as one consistent view on the Raft state loop. A candidate, or a
+server cut off from the majority, is unready until it follows a leader again. That holds
+for a server that does not campaign, because it holds no configuration yet or is not a
+voter: when its election timer fires it forgets the silent leader (section 8.4).
+Readiness does not depend on the read consistency a caller asks for (section 9.2).
+
+### 4.4 Client
+
+`qraft client` validates its identity, server URLs and service definitions, then starts
+its local API, with liveness and readiness, before it contacts the cluster. It never
+opens Raft transport or Raft storage.
+
+Client mode owns:
+
+- a data directory (`client.dataDirectory`), locked by `client.lock` before any thread,
+  HTTP client or listener opens and held until shutdown completes, so one directory
+  belongs to one client at a time. It holds the node ID (`node-id`), what the local API
+  registered (`registrations.json`) and, when token persistence is on, the tokens set
+  through the API (`acl-tokens.json`);
+- the local API: one JDK HTTP server (`LocalApiServer`) serving liveness, readiness,
+  registrations, TTL status, maintenance, membership, leave, metrics, token updates,
+  and forwarded discovery, key/value, session and tenancy routes (section 4.5);
+- node registration and heartbeats, and the reconciler for its service definitions
+  (section 6);
+- local HTTP, TCP, TTL and maintenance checks and their publication (section 7);
+- DNS on its own port when configured (section 5.3);
+- its tokens and its own ACL decisions for the local API (section 11).
+
+The local API listens on `client.bindAddress`, `127.0.0.1` by default as Consul's
+`client_addr` is, so it is reached only from the client's host. The setting is an IP
+address; a host name is refused rather than looked up. A container deployment whose
+applications do not share the client's network namespace sets it, as Consul's
+`client_addr` is set for containers.
+
+**Readiness** is derived continuously from five conditions, which
+`GET /v1/client/self` reports one by one: the client is running; its node registration
+is accepted; every enabled local definition has converged; every required check is
+satisfied; and its last successful server response is fresher than
+`catalog.contactFreshnessMs`. A required check is unsatisfied while it has produced no
+result or its latest result is critical; warning and maintenance keep the client ready,
+optional checks never affect readiness, and liveness never depends on checks. So
+readiness follows the health of the workloads the client represents, while a server
+outage withdraws readiness through contact freshness. A client with no definitions
+needs only an accepted node registration and fresh contact. A failed initial
+registration keeps the local API live and unready and retries in the background.
+
+**Server selection and retry.** The client holds an ordered, deduplicated list of
+server URLs (HTTP or HTTPS origins only). One classified transport,
+`HttpCatalogClient`, carries node registration, heartbeats, catalog operations,
+observations and forwarded reads. Each attempt has a fresh request ID and the configured
+request timeout, and ends in a sealed outcome:
+
+- *success*: a parsed 2xx answer that names what was written and carries its outcome
+  field. Anything else in a 2xx answer is the retryable `invalid_response`, so that an
+  answer some other HTTP service could give never registers anything;
+- *retryable*: a transport failure, a timeout, HTTP 429, 502, 503 or 504, a retryable
+  error envelope, or a malformed 5xx body;
+- *rejected*: a non-retryable envelope or a malformed 4xx body.
+
+`outcome_unknown` is not retryable on the wire, but the client's own registrations,
+heartbeats and observations are idempotent, so the client replays them on it, by the
+code (section 9.1).
+
+Retryable outcomes move to the next URL; a rejection stops. The last successful URL is
+tried first next time, whether it leads or follows, because a follower forwards writes
+to the leader (section 8.5). A returned `leaderId` is kept as a hint. Failed
+node-registration cycles back off exponentially with jitter between
+`catalog.registrationRetryMinMs` and `catalog.registrationRetryMaxMs`; service
+reconciliation stays on the heartbeat cadence and rotates through the list within each
+pass. Validation, authorization and conflict refusals are never retried against every
+server.
+
+A rejected node or service registration is logged with its code and message while the
+client stays live and unready.
+
+### 4.5 API conventions
+
+Both modes' HTTP servers share `common.http.JsonApi`, and every route follows these
+rules. The routes themselves are in [`docs/HTTP_API.md`](../docs/HTTP_API.md).
+
+- **Request IDs.** Every request has an ID: its `X-Request-Id`, or a new one. The answer
+  carries it back, and it is the envelope's `requestId` and the ID in every log line
+  written while the request is handled.
+- **Body limit.** A body longer than 512 KiB is refused with 413 `request_too_large`
+  before the route runs, whether or not it declares its length, as Consul limits its
+  request bodies.
+- **Error envelope.** Every refusal uses one envelope: `code`, `message`, `retryable`
+  and `requestId`, with route-specific fields beside them. Callers branch on `code` and
+  `retryable`, never on the message. A duplicate `error` property holding the code stays
+  for one compatibility release and is removed in the first release after 2026-12-31.
+  A success-shaped body is never returned for a failure.
+- **Unrouted paths.** A path no route serves answers 404 `not_found` in the envelope,
+  after its body is read. The JDK server would otherwise answer it as HTML and close
+  the connection with the body unread, a reset that can discard the answer.
+- **Unknown query parameters are refused.** A route answers 400 `invalid_query`, naming
+  the parameter, for a parameter it does not take. Consul's handlers ignore parameters
+  they do not know; here an ignored parameter would answer another question than the
+  one asked (`?tag=blue` would list every instance). Every catalog, health and
+  key/value read takes the read options `stale`, `consistent`, `index` and `wait`
+  (section 9.2); the health read also takes `passing`.
+- **Names in paths.** In a read route such as `/v1/catalog/service/{name}`, the name is
+  everything after the route's prefix, decoded once, as in Consul; it may contain a
+  slash.
+- **Identity and scope headers.** A request names where it acts with four headers:
+  `X-Qraft-Node` (the node, required on node and service writes), `X-Qraft-Node-ID` (the
+  node ID, a canonical lower-case UUID, optional), `X-Qraft-Tenant` and
+  `X-Qraft-Namespace` (each `default` when absent). A blank scope header is 400
+  `invalid_scope`. A token travels in `X-Qraft-Token` or `Authorization: Bearer`.
+  The headers state the caller's choice; with ACLs enabled the token decides whether
+  it may act there (section 11).
+- **Request DTOs.** Registration, observation and heartbeat bodies map explicitly to
+  commands. Unknown fields are refused. A body cannot set what the server owns:
+  authoritative health, Raft indexes, node status or server-stamped times.
+- **Index metadata.** Every read carries the index it answers at in `X-Qraft-Index`: the
+  applied index for catalog reads and the key/value state's last index for `/v1/kv`.
+  Indexes are monotonic for a committed history and are never wall-clock times.
+- **Answering server.** Every answer of a server, a refusal and an unrouted path
+  included, names the server that gave it, by node ID, in `X-Qraft-Answered-By`.
+
+## 5. Domain model
+
+### 5.1 Tenants and namespaces
+
+A tenant is the top-level ownership and isolation boundary, Consul's admin partition
+under Qraft's name. A namespace is an isolation boundary within a tenant, commonly an
+environment, team or application group. Services, checks, keys and the audit records of
+requests carry a tenant and namespace; nodes, sessions, ACL tokens and policies have
+none.
+
+- **State** (`state.tenancy`): tenants and their namespaces, each with a description
+  and the indexes that created and last changed it. The `default` tenant and every
+  tenant's `default` namespace always exist and cannot be deleted on their own. Names
+  are lower-case DNS labels, and so are the scope headers.
+- **Enforcement.** A service registration, a key write or a lock acquisition into a
+  tenant or namespace that does not exist is refused 404 `tenant_not_found` or
+  `namespace_not_found`. The server checks before it proposes, and the state machine
+  checks again at the entry's place in the log through `ScopedWrite`. Only servers that
+  know tenancy propose the wrapper, so a log written before tenancy replays to the
+  state it had.
+- **Deletion.** Deleting a namespace removes its services, their checks and its keys in
+  the same replicated step. Deleting a tenant removes its namespaces and everything they
+  held.
+- **Events.** Each tenancy change produces a domain event in the scope it names,
+  identical on every replica.
+- **Discovery never crosses scope.** Catalog and health reads answer only the scope
+  their headers name. Reads across scopes exist only for administration:
+  `/v1/internal/ui/scopes` (what each namespace holds), `/v1/internal/ui/locks` and
+  `/v1/internal/ui/audit`, each filtered by the caller's permissions.
+- A client's local API acts in the client's configured tenant and namespace when the
+  caller names none.
+
+### 5.2 Nodes and node identity
+
+A client is the client-mode process; a node is the stable logical identity it
+represents. One node hosts many service instances. A node in the replicated registry
+has the shape of a Consul node, with the status and times the servers record:
+
+- `name`, its key in the registry;
+- `id`, the node ID: a UUID the client generates at its first start and keeps in
+  `node-id` in its data directory, written atomically and forced to disk. A restart
+  keeps it; a wiped directory gives a new node; a `node-id` that cannot be read stops
+  the start and is never replaced. A node registered by an older client, log entry or
+  snapshot may have none;
+- `address`, `datacenter`, `region`;
+- `metadata`, free-form text, including `qraft.version` and `qraft.registrationId`, the
+  identifier of the node's current registration;
+- `status`, `registering`, `healthy` or `unreachable`, set only by servers;
+- `registrationTime` and `lastHeartbeat`, stamped by the receiving server. The node's
+  last contact is its last heartbeat, or its registration time before the first one.
+
+A node has no host name and no port: a port belongs to a service instance. Its name is
+`client.nodeName`, the machine's host name by default; a host name alone is not an
+identity, which is why the node ID exists.
+
+**Who may hold a name**, by Consul's catalog rules (`ensureNodeTxn` and
+`ensureNoNodeWithSimilarNameTxn` in its state store). Each rule is decided when the
+registration is applied, from replicated state alone, so every replica decides alike:
+
+- Names conflict regardless of case: `Web-1` and `web-1` are one name. A name is stored
+  as given.
+- A node holds its name while it is `registering` or `healthy`. A registration under a
+  name held by a node of another ID is refused 409 `node_name_reserved`, and so is one
+  without an ID under the name of a node with one. A node that has not yet sent its
+  first heartbeat keeps its name, which is stricter than Consul, where a node without a
+  Serf check can be replaced.
+- Once the holder is `unreachable`, or reaped, a new ID takes the name. A takeover
+  removes the old node's services and checks in the same replicated step. Consul leaves
+  them to the new agent's anti-entropy; Qraft's reconciler also removes what it does
+  not want (section 6.2), but only in its own tenant and namespace and not before its
+  first pass, so the server removes them.
+- An old node that returns after a takeover is another ID asking for a held name, and
+  is refused while the new holder holds it.
+- A registration with an ID that no node has claims a node without an ID, even one
+  holding its name, and keeps its services and checks: it is that machine after an
+  upgrade. This is Consul's rule.
+- The same ID under a new name, or another spelling of its name, is a rename, as in
+  Consul: the node is removed under its old name with its services and checks and
+  inserted under the new one in the same step, and the reconciler registers its
+  services again on its next pass. A rename into a name another node holds is refused;
+  into an unreachable holder's name, it takes the name over.
+- A service registration, service deregistration, check observation or node
+  deregistration that carries an ID is refused when the node it names is registered
+  with another ID, so a node that lost its name cannot change what the new holder
+  registered. A heartbeat naming an earlier registration is refused as
+  `registration_superseded`.
+
+A client refused with `node_name_reserved` logs it and tries again after its
+registration backoff, so a host rebuilt with an empty directory takes its name over
+once its old node is unreachable. A client whose registration was superseded learns it
+from its next heartbeat and registers again the same way, as Consul's agent keeps
+syncing. While its node is not registered a client sends no service write, as Consul's
+agent syncs its node before its services.
+
+With ACLs enabled, these rules apply on top of what the caller's token may write
+(section 11.2). With ACLs disabled, any caller can claim any node name and ID
+(section 17).
+
+### 5.3 Services
+
+A **service definition** is client-owned. It comes from the configuration file's
+`catalog.services` array or from the local API, and holds a local service ID, a service
+name, an address and port, tags, metadata, an enabled flag and optional checks. It
+holds no authoritative health and no Raft index.
+
+A **service instance** is server-owned replicated state derived from a registration
+command. Its durable identity is `(tenantId, namespace, nodeId, serviceId)`, so two
+nodes can use the same local service ID without overwriting each other; its discovery
+grouping key is `(tenantId, namespace, serviceName)`. Re-registering the same identity
+is an idempotent update. An instance stores the definition's fields, its datacenter and
+region, its current health, and two indexes, as Consul's `CreateIndex` and
+`ModifyIndex`: `createIndex`, the entry that registered it, and `modifyIndex`, the entry
+that last changed it. A registration that changes nothing but the health it carries
+moves neither.
+
+**Declared checks.** A registration may declare the check IDs its client will publish.
+Declaring prunes any replicated check not in the list and makes the server refuse later
+observations for undeclared checks; an empty list declares none. Omitting the list, as
+older clients do, keeps existing checks and accepts any check ID. The client always
+declares the checks configured for a service.
+
+**Registration bodies.** One `PUT /v1/catalog/register` carries a node, a service or
+both, after Consul's catalog. The whole body is checked before anything is replicated;
+when it holds both, the node is committed first, then the service. A service the
+catalog then refuses answers 409 `registration_rejected`, the node stays registered,
+and the client's retry repeats both idempotently. Deregistration follows Consul's rule:
+a body that names no service removes the node itself; one that names a service removes
+only that service. The service ID must be a non-blank string, so that a missing value
+cannot remove the node instead.
+
+**DNS.** A server and a client each serve DNS when configured, over UDP and TCP, for the
+domain `qraft` unless another is named, with the names of Consul's DNS interface:
+`[tag.]<service>.service[.<namespace>.ns][.<tenant>.ap].<domain>`, RFC 2782 SRV names,
+`<node>.node.<domain>` and `<hex address>.addr.<domain>`. A lookup asks the same reads
+as HTTP: a server runs its own health and node reads in memory, under the token in its
+DNS token file; a client forwards them to the servers under its default token. So ACLs,
+tenancy and readiness mean in DNS what they mean in HTTP. Without `ns` or `ap` labels a
+server reads the `default` scope and a client its own. An instance is answered when its
+health is passing, warning or unknown and its node is not unreachable; `onlyPassing`
+leaves out warnings. Answers are shuffled. A name in the domain that names nothing is
+NXDOMAIN; a name outside it is REFUSED, because there are no recursors; a read the token
+may not make is REFUSED; a failed read is SERVFAIL. A UDP answer fits 512 bytes, or the
+query's EDNS size up to 4,096, and is marked truncated when records are left out.
+Prepared queries, recursors, a DNS token kind and other datacenters are not offered.
+
+### 5.4 Health
+
+Health is server-owned state derived from observations that clients report. The states
 are:
 
-- `default`: server-selected safe default.
-- `stale`: local applied state without leader coordination.
-- `consistent`: leader-confirmed read after establishing current-term authority.
+- `UNKNOWN`: no observation has been accepted;
+- `PASSING`: every required check passes;
+- `WARNING`: degraded but discoverable;
+- `CRITICAL`: a required check fails or has expired;
+- `MAINTENANCE`: explicitly taken out of passing discovery.
 
-A follower may serve stale reads. Consistent reads require leader confirmation or
-forwarding. Writes may be forwarded or rejected with a structured leader hint;
-until forwarding exists, clients rotate through configured seeds.
+An instance's health is the deterministic aggregate of its checks. Health changes are
+separate Raft commands; a registration cannot claim a health result, and a stored
+registration always starts `UNKNOWN`. `FAILING` remains only so an older snapshot loads,
+and is counted as `CRITICAL`; no observation can carry it. Section 7 describes how
+health is observed and expired.
 
-Built on 2026-11-08 by [`task-list-consistency-2026-11-08.md`](../docs/archive/task-list-consistency-2026-11-08.md), for
-the catalog's reads and `/v1/kv`:
+### 5.5 Key/value
 
-- **`?consistent`** is answered by the leader once `RaftNode.readBarrier()` passes:
-  Raft's ReadIndex, which records the commit index, or the first index of the
-  leader's term if that is later, sends a heartbeat round, and completes once a
-  quorum has answered a request sent after it began and that index is applied.
-  Each AppendEntries request carries the sequence it was sent at, so a late answer
-  to an earlier request confirms nothing. Another server answers 503
-  `leader_unavailable` with the leader hint, and a client tries its next server.
-- **`?stale` and the default** are the answering server's applied state. Consul's
-  default reads go to the leader through server-side forwarding, which Qraft does
-  not have; making the default leader-only would refuse every read a follower
-  answers, so the default is stale reads with a known leader. A difference from
+Key/value entries follow Consul's KV store:
+
+- **State** (`state.kv.KvState`): entries by tenant, namespace and key, each with an
+  opaque value, 64-bit flags, a creation and a modification index (the Raft indexes of
+  the commands that wrote it), and for a lock its session and `LockIndex`. The store
+  takes the entry being applied at the last applied index plus one, since `RaftNode`
+  applies entries in order.
+- **Writes** are Raft commands. A set or delete with a compare-and-set index applies
+  only at the entry's modification index, or for 0 only to an absent key; deleting an
+  absent key succeeds. Acquire and release are conditional writes (section 5.6).
+- **Reads** list prefixes deterministically, take `recurse`, `keys`, `separator` and
+  `raw`, and answer in Consul's field names. A blocking read waits for the key/value
+  state's index to pass the caller's (section 9.2).
+- **ACLs**: `key` and `key_prefix` rules, scoped as `service` rules are. A read needs
+  `key:read` and a recursive read leaves out what the token cannot read; a write needs
+  `key:write`; a recursive delete needs write on every key under the prefix, decided as
+  Consul's `KeyWritePrefix` decides it. There is no `list` access.
+- `qraft kv get`, `put` and `delete` drive it from the command line, with Consul's
+  messages.
+- The older replicated metadata map and the gRPC `DistributedStateService` that serves
+  it are separate from `/v1/kv`.
+
+### 5.6 Sessions and locks
+
+Sessions follow Consul's:
+
+- **State** (`state.session`): sessions by ID, each bound to a registered node, with a
+  name, a behaviour (`release` or `delete`), an optional TTL, a lock delay and the index
+  that created it.
+- **What is replicated.** Creating and destroying a session are Raft commands, and so
+  is a lapse, which is a destroy stamped with the leader's time and the cause `ttl`.
+  Every replica therefore orders a lapse against every other write alike.
+- **Renewal is not replicated**, as in Consul's `session_ttl.go`. The leader keeps the
+  TTL timers in memory (`server.session.SessionTtlExpiry`): a session lapses twice its
+  TTL after the later of its creation, its last renewal and the start of this
+  leadership. A follower that receives a renewal forwards it to the leader like any
+  write (section 8.5). A new leader gives every session twice its TTL again, so a
+  failover never ends a session early.
+- **Invalidation.** A session ends when it is destroyed, when it lapses, or when its node
+  becomes unreachable, is reaped, deregistered or replaced. Its keys are then released
+  or deleted by its behaviour, and none can be acquired again until its lock delay,
+  counted from the invalidation's time, has passed. The times come from the proposer,
+  so every replica keeps the same delay. The destroy carries its cause (`destroyed`,
+  `ttl` or `node`) so that events and metrics record why.
+- **Locks.** `acquire={session}` sets a key and its session when no other session holds
+  it and its lock delay has passed; a new holder increments `LockIndex`.
+  `release={session}` frees a key only for the session that holds it.
+- **ACLs**: `session` and `session_prefix` rules name a node. Creating, renewing or
+  destroying needs `session:write` on the node, reading needs `session:read`, and
+  acquiring or releasing needs `key:write`.
+- The server requires a session's node; a client's local API binds a session without
+  one to the client's node.
+
+Leader election is library behaviour built on sessions and locks, not a second
+consensus mechanism. The Java client library, `dev.mars.qraft.client.api`, is Consul's
+Go `api` package for Java applications: `QraftApi` (an address, a token and a scope;
+synchronous calls; a refusal throws `QraftApiException` with the status, code and
+message), `KeyValue`, `Sessions`, and `LeaderElection`, which holds a contender's
+session, acquires the key, blocks on it while another holds it, renews every half TTL
+while it leads, confirms with consistent reads that it still holds the key, and tells a
+listener when leadership is gained and lost. A lost renewal, a key no longer held, or a
+failed call while leading ends leadership, and it campaigns again with a new session.
+The recipe without the library is in
+[`docs/OPERATIONS.md`](../docs/OPERATIONS.md#sessions-and-locks).
+
+## 6. Registration, reconciliation and anti-entropy
+
+### 6.1 Registration flow
+
+1. The client loads and validates its service definitions.
+2. The local API becomes live and reports not ready.
+3. The client registers its node, then keeps it with heartbeats every
+   `client.heartbeatIntervalMs`.
+4. Once the node is accepted, the client starts the checks of enabled services and
+   submits each enabled definition as an idempotent registration.
+5. The receiving server validates the request and proposes a command, forwarding it to
+   the leader when it follows.
+6. Success is returned only after the command is committed and applied.
+7. The client becomes ready once every enabled definition has converged, its required
+   checks are satisfied and server contact is fresh.
+
+A partial registration is kept. The client retries only missing or changed
+definitions and never rolls back what committed.
+
+### 6.2 Reconciliation and anti-entropy
+
+The client reconciles continuously rather than relying on one startup request, so the
+catalog is repaired after administrative deletion, interrupted communication or a crash.
+
+- **One source.** `LocalDefinitions` combines the configuration file's definitions,
+  read once at startup, with what the local API registers while the client runs. A
+  change runs a pass at once, as Consul's agent triggers a sync; a pass already running
+  read the old definitions, so one more runs after it.
+- **Single flight.** One pass runs at a time, on the client's lifecycle-owned scheduler,
+  at the heartbeat cadence.
+- **Minimal writes.** A stable content fingerprint prevents a write when a definition has
+  not changed. An unchanged definition is verified by a catalog read, filtered by its
+  complete tenant, namespace, node and service identity; a missing instance is
+  registered again; a changed one is resubmitted; an unchanged refused definition is
+  reported without being retried every pass. A service refused with
+  `node_name_reserved` is sent again on the next pass, not suppressed as refused.
+- **Removal of what only the catalog knows**, as Consul's anti-entropy does. A pass reads
+  the node's services (`GET /v1/catalog/node-services/{nodeName}`) and deregisters any
+  in the client's tenant and namespace that its source does not want, whether or not
+  this process registered it: a definition removed while the client was down, a
+  deregistration accepted just before a crash, or a service something else registered
+  on the node. A service in another scope is left alone. When no server can answer, the
+  pass goes on with what the process remembers. Nothing is read while the node is not
+  registered.
+- A sync refused for its token is a warning, counted as synced, and tried again on the
+  next pass.
+
+### 6.3 Registrations through the local API
+
+The local API registers services and checks after Consul's agent API
+(`agent/agent_endpoint.go`). A write answers once the change is kept and has taken
+effect locally: its checks run and readiness counts them. The servers learn of it from
+the reconciler, as Consul's agent syncs after it answers. A check's first observation
+can therefore reach a server before its service; the client retries it.
+
+- **IDs.** A service ID defaults to its name and its address to the client's, as in
+  Consul. A check ID is unique across the client, so registering it for another service
+  moves it. At run time the latest registration or deregistration wins, including for a
+  service the configuration file defines.
+- **Persistence.** What the API registered is kept in `registrations.json`, replaced
+  atomically and readable only by the client's user, and restored at startup. At
+  startup the file's definitions take precedence: a kept registration of the same ID is
+  purged, and so is a kept check whose service is gone, so a file-defined service that
+  the API deregistered is back after a restart. A `registrations.json` that cannot be
+  read stops the client and is never replaced, where Consul logs it and continues. A
+  change that cannot be kept is logged as an ERROR with its cause, answers 500
+  `registration_not_kept`, retryable, and changes nothing.
+- **TTL status.** An application reports a TTL check's status through `pass`, `warn`,
+  `fail` or `update`. A status is not kept across a restart, where Consul keeps it until
+  it would have expired.
+- **Maintenance** takes a service, or every service of the node, out of passing
+  discovery while it stays registered. As in Consul it is a check of its own,
+  `_service_maintenance:{serviceId}` or `_node_maintenance:{serviceId}`, kept across a
+  restart; enabling it again keeps the first reason, and applications may not use those
+  IDs. The service declares the check, which reports `maintenance` with the reason as
+  its output every third of its 60-second TTL, because a service registered again comes
+  back without its checks' state. Unlike Consul's critical maintenance check it is not
+  required, so it never holds the client's readiness back. Disabling it ends the
+  declaration and the server prunes the check; deregistering the service ends its
+  maintenance.
+- **Writes during shutdown.** Once shutdown begins, before anything is deregistered, a
+  local API write is refused 503 `shutting_down`, retryable, so nothing is registered
+  behind the deregistration. Reads, liveness and readiness are served until the listener
+  stops, last. Consul's agent does not refuse writes while it leaves; this is stricter.
+
+**Forwarded reads.** The local API forwards the catalog and health reads, key/value,
+session and tenancy routes to the servers, as Consul's agent serves them, so an
+application needs only its local client. Each reaches the servers with the caller's
+path and query, so what a request means is decided in one place. Without scope headers,
+a forwarded request uses the client's own tenant and namespace, where its API
+registers; a request straight to a server uses `default`. A forwarded request goes
+under the caller's token, else the client's default token. A busy or unreachable server
+is passed over for the next; with no answer at all the client answers 503
+`no_server_reachable`, never older data. A key/value or session write moves to the next
+server only when it cannot have been applied; one sent and never answered is answered 503
+`outcome_unknown`, not retryable, and no other server is asked. Applications register services through
+`/v1/client/*`; the local API does not forward catalog writes, which Consul's agent
+does.
+
+**Members.** `GET /v1/client/members` is a forwarded read of the server's node list,
+because Qraft has no gossip pool. Consul's `/v1/agent/members` lists its gossip pool,
+and Consul itself points to `/v1/catalog/nodes` for a consistent list. So there is no
+answer without a server, only clients are listed (servers have no node entry), and a
+node that left is gone where Consul shows it as `left`. Consul's `wan` and `segment`
+parameters are not carried over.
+
+### 6.4 Deregistration and leave
+
+Deregistration is node-scoped and idempotent: removing an absent instance is a
+successful no-op. A node's deregistration, as in Consul, removes its entry and every
+service and check registered on it in every tenant and namespace, in one replicated
+step, including services registered under its name when it has no entry.
+
+During graceful shutdown the client:
+
+1. withdraws readiness;
+2. stops local checks and publications, waits for publications in flight, and stops
+   new reconciliation, waiting for a pass in progress;
+3. deregisters every service known to have committed, within its bound;
+4. prevents new node registrations, waits for one in flight, and deregisters its node,
+   which removes anything a failed service attempt left behind;
+5. stops the local API;
+6. closes its scheduler and HTTP resources.
+
+Repeated and concurrent shutdown calls share one completion, bounded by
+`client.shutdownTimeoutMs`. When the deadline passes, outstanding HTTP work is cancelled
+and incomplete cleanup is reported once; shutdown never delays process exit
+indefinitely. Automatic expiry (section 7) still handles a client that cannot leave.
+
+`PUT /v1/client/leave` runs the same sequence, answering between steps 4 and 5 with
+whether the client left the catalog, then finishes shutting down; the process exits
+with code 0. A Consul client does the same: its `Client.Leave` logs a failed leave and
+returns no error. A client that could not deregister is treated as one that crashed: its
+checks expire, its node becomes unreachable after `nodeTtlMs`, and the catalog keeps
+both until `nodeReapAfterMs`. Consul treats a leave as a permanent intent and does not
+rejoin without an explicit join or `rejoin_after_leave`; a Qraft client always has its
+server URLs, so its next start registers it again.
+
+## 7. Health and failure detection
+
+### 7.1 Client checks
+
+Clients run checks close to the workload. Each check runs independently on the client's
+scheduler, and its next attempt starts only after the previous one completes or times
+out, so a check never overlaps itself. A timeout cancels the request or connection and
+records a critical result. Output is limited to 4,096 characters, matching the server.
+Local results never change server state directly; they are published as observations.
+
+- **`http`** sends a GET to an absolute HTTP or HTTPS URL without user information. A
+  2xx answer is passing, 429 is warning, anything else or a transport failure is
+  critical. The body is discarded.
+- **`tcp`** opens one connection to the check's address and port, by default the
+  service's. A connection is passing, a failure critical. With `warnAfterMs`, a
+  connection that takes at least that long is a warning; the threshold must be shorter
+  than the timeout.
+- **`ttl`** has no probe. The application reports its status through the local API; if
+  no report arrives within the TTL, the client records a critical result.
+- **maintenance**: the client's own check (section 6.3).
+
+For `http` and `tcp`, the timeout must not exceed the interval and the TTL must exceed
+it. The TTL is the server-side time to live of each published observation. A check is
+required unless it says otherwise. Any check may set `deregisterAfterMs`, how long it
+may stay expired before its service is deregistered automatically; zero means never.
+Defaults are in [`docs/CONFIGURATION.md`](../docs/CONFIGURATION.md).
+
+### 7.2 Observations
+
+`HealthPublisher` publishes each check's results as sequenced observations, at most one
+in flight per check, coalescing results that arrive meanwhile to the latest. A changed
+status or output is published immediately; an unchanged result is published again as a
+renewal once half the check's TTL has passed since its last acceptance. A renewal is
+simply a newer observation of the same check.
+
+- **Sequences** are strictly increasing per check and start from the wall clock in
+  milliseconds, so a restarted client normally exceeds what its predecessor left. The
+  state machine accepts only a strictly newer sequence.
+- **Server time decides expiry.** The receiving server stamps the command with its own
+  receipt time, and the deadline is that time plus the TTL. The client's clock never
+  determines expiry, so client clock skew cannot keep a registration alive. An
+  observation's `observedAt` is kept for display.
+- **Replay is safe.** An exact replay of the accepted observation answers as the
+  original did, with its deadline, so a retry after an unknown outcome is safe. An older
+  sequence, or the same sequence with different content, is 409 `stale_observation`
+  with the current sequence, and the client raises its floor to it and publishes again.
+- **Not yet registered.** An observation for an instance that is not registered is 404
+  `service_not_found`, and for an undeclared check 404 `check_not_declared`. The client
+  retries both after the registration backoff, because its own re-registration may not
+  have committed yet; the server treats the retry as an idempotent replay. Other
+  refusals are logged and dropped.
+
+### 7.3 Leader-owned check expiry
+
+Expiry is deterministic: the leader evaluates deadlines and proposes explicit expiry
+commands, and followers change catalog state only by applying committed entries, never
+from local timers.
+
+`server.health.LeaderHealthExpiry` runs only while its server leads. It evaluates on
+gaining leadership, then at the sooner of `server.health.expiryIntervalMs` and the next
+due instant. Losing leadership cancels evaluation and forgets proposals in flight, and
+completions from an earlier term are ignored. A due command is not proposed again while
+it is in flight, and each proposal times out after five seconds so a lost proposal is
+evaluated again. The side-effect-free `HealthExpiryEvaluator` applies these rules:
+
+- **Grace after failover.** Clients cannot renew while there is no leader, and servers'
+  clocks may differ. A check is due only at the later of its stored deadline and the
+  current leader's acquisition time plus the check's TTL, so a failover never
+  mass-expires checks, and a leader whose clock runs ahead still waits a full TTL.
+- **Exact identity.** Every command names the stored sequence and deadline. A renewal
+  committed first turns the expiry into a no-op; an expiry committed first is superseded
+  by the renewal.
+- **Two phases.** An unrenewed check is first marked expired, which makes a required
+  check critical. If its latest observation carries a positive deregistration delay, the
+  leader deregisters the instance that long after the effective deadline. The state
+  machine accepts a deregistering command only for a check that is already expired.
+- **Saturation.** A deadline beyond the representable time range never falls due.
+
+Deregistration removes the instance, its checks and its declared check set. A client
+that is still alive registers the instance again through reconciliation.
+
+### 7.4 Node membership expiry
+
+Qraft has no gossip; a node's liveness is its heartbeats. The same leader-only component
+expires silent nodes under a server-wide policy, `server.health.nodeTtlMs` and
+`server.health.nodeReapAfterMs` (Consul's 72-hour reconnect window by default; zero never
+reaps). Registration and heartbeat times are stamped by the receiving server, and all
+replicated times are stored in milliseconds, so leader and followers hold identical
+values that expiry can match exactly.
+
+- A node is due at the later of `lastContact + nodeTtlMs` and `leaderSince + nodeTtlMs`,
+  the same failover grace as for checks.
+- The first phase marks it `unreachable`; a later heartbeat makes it `healthy` again.
+- With a positive reap delay, an unreachable node is reaped that long after its
+  effective deadline. Reaping removes the node and every service instance on it, in
+  every tenant and namespace, with their checks and declared check sets, so a crashed
+  client's services go even when they have no checks.
+- Both phases name the stored last contact, so a heartbeat or re-registration committed
+  first makes a stale command a no-op. Reaping applies only to an unreachable node. A
+  node command differing only in its proposal time is the same expiry in flight and is
+  not proposed twice.
+- A node becoming unreachable, or being reaped, invalidates its sessions (section 5.6).
+
+### 7.5 Health in discovery
+
+- The health read returns every instance of a service in deterministic identity order,
+  whatever its health, each with its checks in check-ID order and its node's status.
+- `?passing` keeps only instances whose aggregate health is `PASSING` and whose node is
+  not `unreachable`. A check keeps its last result until its TTL lapses, and the TTL has
+  no upper limit, so its check alone could keep a service passing long after its node
+  stopped. Consul excludes such a service because the failed node's critical
+  `serfHealth` check counts among its checks; Qraft decides the same at the read, from
+  the replicated node status, so every server answers alike. Check results and stored
+  health do not change, and a returning heartbeat restores the instance with no new
+  observation. An instance whose node has no entry is decided by its checks.
+- So a client cut off from the servers has its services leave `?passing` after
+  `nodeTtlMs`, though they may still run, as Consul's failure detector does; the grace
+  after failover stops a change of leader from dropping them.
+- The catalog's service read returns bare registrations, so it lists an unreachable
+  node's instance until the node is reaped.
+- DNS answers passing, warning and unknown instances of reachable nodes, as Consul's DNS
+  does, unless `onlyPassing` is set.
+- Health reads never change the catalog.
+
+## 8. Raft
+
+Raft is implemented in `dev.mars.qraft.raft`. All state transitions run on one platform
+thread, the `RaftStateLoop`, through the `RaftTransitionSequencer`.
+
+### 8.1 Server identity
+
+Each server has a durable **server ID**, a UUID generated at its first start and kept in
+`server-id` in its Raft data directory, written atomically and made durable while the
+WAL holds the directory's lock.
+
+- A restart on the same storage keeps the ID; a wiped directory gives a new one; a data
+  directory from before server IDs gets one at its next start.
+- A file that exists but cannot be read stops the start and is never replaced.
+- Every Raft request and response names its sender's server ID. An append or snapshot
+  install also names its target's, and a server refuses one naming another server ID
+  before its term, log or snapshot changes. A server that lost its storage answers at its
+  old address under a new ID, so it cannot install a snapshot meant for the entry it
+  replaced, which would leave it holding a configuration without itself.
+- `/raft/status` and the startup log report it.
+
+### 8.2 Bootstrap and joining
+
+A server with no Raft state asks every server in `server.raft.nodes` to describe itself
+over the Raft port, then decides:
+
+- **Bootstrap** when every listed server answers, none holds Raft state, and all list
+  exactly the same servers. It writes the configuration at index 1, in term 0, treated as
+  committed. The configuration is built from each server's own answer, so every server
+  that bootstraps writes the identical entry. A sole member bootstraps itself.
+- **Join** when a listed server already holds state (below).
+- **Retry** every second while some listed server has not answered, until it holds a
+  configuration.
+- **Never bootstrap** when the lists differ.
+
+**Joining.** A server with no Raft state that finds a cluster asks the listed servers in
+turn to add it, as Consul's `retry_join` tries every address. It stops at the first that
+answers for a leader, passing over one that cannot be reached or knows no leader, and
+asks again every second until the leader has replicated the configuration to it. Any
+server forwards the request to the leader over the Raft port. The leader adds the server
+as a non-voter and promotes it (section 8.3). There is no operator command to add a
+server, as in Consul.
+
+**Rejoining after lost storage.** A server that lost its storage returns under a new
+server ID. While another server ID holds its name or address, admission is refused until
+an operator removes that entry. A join alone never evicts another server ID.
+
+**Moving with its storage.** A server that returns under its server ID and name at a new
+address has its configured address updated and keeps its vote, as Consul's `AddServer`
+does. A request under another name, or for an address another server holds, is refused.
+Startup retries joining when the recovered configuration records an old self-address,
+until replication confirms the advertised address.
+
+**Addresses.** Once a server holds Raft state, its membership comes from the replicated
+log; `server.raft.nodes` no longer changes it. The transport reaches each configured
+server at the address in the configuration, which overrides the setting, because a
+joined server is in no server's list and a rejoined one may have a new address.
+
+The procedures for replacing a server and for recovery are in
+[`docs/OPERATIONS.md`](../docs/OPERATIONS.md#replace-a-server-that-lost-its-storage).
+
+### 8.3 Membership
+
+Raft membership is recorded in the replicated log, as in Consul.
+
+- **The configuration** lists each voter and non-voter with its server ID, name and
+  address. Each server uses the latest configuration in its log, committed or not.
+  Truncating an uncommitted configuration reverts to the one before. A snapshot records
+  the configuration it covers in an envelope around the state machine's snapshot.
+- **Log invariants.** Index 1 always holds the bootstrap configuration, in term 0. A
+  follower refuses an append that would replace a committed entry. Every new leader
+  appends a no-op in its term, so an idle cluster can commit an entry in that term
+  before changing membership.
+- **No upgrade from before configurations.** A data directory that holds Raft state but
+  no configuration refuses to start.
+- **Counting.** Elections, commits and check-quorum count only voters, by server ID. A
+  reply counts, and is listened to at all (its term included), only when the server ID
+  it names is the one the configuration records for that peer. A server that lost its
+  storage therefore cannot vote or be counted for the server it replaced.
+- **Campaigning.** A server that is not a voter in its configuration never campaigns.
+- **Changes** are made one server at a time. A leader may start a change only after it
+  has committed an entry in its current term, and only when no other change is
+  uncommitted. Every configuration entry, however submitted, meets these rules. A server
+  is added as a non-voter; a change that adds a voter directly is refused.
+- **Promotion**, as Consul's autopilot does it. A non-voter is replicated to but not
+  counted. At each heartbeat round the leader judges a non-voter healthy when it has
+  answered this leader within the last two heartbeat rounds (only replies to the current
+  leadership are recorded, so its term matches; Consul's `LastContactThreshold` is
+  200 ms) and its log trails the leader's by at most
+  `server.raft.membership.promotionMaxTrailingEntries` (Consul's `MaxTrailingLogs`).
+  Once it has been healthy for `server.raft.membership.promotionStabilizationMs`
+  (Consul's `ServerStabilizationTime`, counted in heartbeat rounds), the leader proposes
+  it as a voter. A lapse in health restarts the period. One server is promoted at a
+  time; a promotion refused, for example while another change is uncommitted, is tried
+  at the next round. A new leader starts every period afresh.
+- **Removal.** An operator removes a server by ID or name, through
+  `DELETE /v1/operator/raft/peer` or `qraft operator raft remove-peer`. Any server takes
+  the request and forwards it to the leader over the Raft port with its token, which
+  the leader checks again in its own state. Removing a voter is refused unless the
+  voters left, among those the leader has heard from within its check-quorum window,
+  are a quorum; a non-voter can always be removed. A leader that removes itself steps
+  down once the removal commits and never campaigns again; the rest elect a leader. It
+  keeps running, reports `removed` in `/raft/status` and readiness, and refuses writes as
+  a follower does, so it can be stopped. A follower removed by another leader is no
+  longer replicated to and may never learn of its removal; it keeps asking for pre-votes,
+  harmlessly (section 8.4), and should be stopped.
+- **Automatic failed-voter cleanup**, as Consul's autopilot `CleanupDeadServers`. The
+  leader tracks each voter's absence in applied heartbeat rounds, never wall-clock time,
+  so a delayed state loop never invents missed rounds. A new leadership starts a fresh
+  grace, and a valid reply resets absence by server ID. A cleanup pass freezes its
+  committed voter count, its eligible server IDs in sorted order, and a budget of
+  `floor((N - 1) / 2)` removals. Before each proposal it checks again the failure, the
+  configured minimum number of voters, recent contact with both the current and the
+  proposed quorum, the current-term commit and the single-change rule, and it waits for
+  each removal to commit before the next. A candidate that recovers is skipped; an
+  unrelated membership change, a failed proposal or a leadership change abandons the
+  pass. Failure tracking and pass state are the leader's alone and never persisted, so a
+  leadership change restarts the grace. A committed promotion can trigger cleanup after a
+  replacement joins with a distinct name and address; a replacement reusing either needs
+  the old entry removed first. Its settings are under `server.raft.membership.cleanup`,
+  and its operation is in
+  [`docs/OPERATIONS.md`](../docs/OPERATIONS.md#automatic-failed-voter-cleanup).
+- **The Raft port** without TLS is trusted: anyone who can reach it can join a server
+  that is later promoted, as they can already send Raft messages, so it belongs on a
+  private network. With `server.tls.raft` only a peer with a certificate from the
+  cluster's CA takes part (section 11.3).
+
+### 8.4 Elections: Pre-Vote, stickiness and check-quorum
+
+**Pre-Vote.** An election timeout does not raise a term. A voter with at least one other
+voter first sends each a `PreVote` request for the next term and starts the real election
+only when a quorum, itself included, would vote for it. The rules follow the Raft thesis
+(section 9.6) and etcd:
+
+- **A receiver changes nothing.** It records no vote, adopts no term and does not count
+  the sender as a leader.
+- **A receiver says yes only if** it is running; the sender is a voter in its
+  configuration (a server with no configuration yet cannot check, and answers by the
+  other rules, or a first server that bootstrapped alone could never be elected); it is
+  not a leader and has heard from none within an election timeout (the same test the
+  real vote uses); the proposed term is strictly ahead of its own; and the sender's log is
+  at least as up to date as its own.
+- **A round forgets a silent leader.** A follower whose election timeout fires has not
+  heard its leader for a whole timeout, so it stops reporting that leader, and its
+  readiness fails, as it would on becoming a candidate. A heartbeat restores it. Without
+  this a cut-off follower would keep claiming readiness.
+- **A round ends on a no, on silence, or on a heartbeat.** The election timer is armed
+  again when the round starts and its generation is checked when an answer arrives, so
+  a heartbeat meanwhile cancels the round.
+- **A later term in an answer is adopted**, as for a vote: the asking server persists it,
+  becomes a follower in it, and asks beyond it next time. Such an answer is always a
+  refusal from a server already in a later term, and only a configured server's answer
+  counts. `hashicorp/raft`'s `runCandidate` and etcd do the same. Without it, two servers
+  can deadlock with no leader: one behind in term with the longer log, the other ahead in
+  term with the shorter, each refusing the other's pre-vote. Unlike `hashicorp/raft`, a
+  pre-vote is granted only for a term strictly ahead of the receiver's.
+- **A sole voter skips the round**, as it skips voting.
+- **Compatibility.** `RaftTransport.sendPreVote` is a default that fails as unsupported.
+  `GrpcRaftTransport` turns a peer's `UNIMPLEMENTED` into that failure, and the asking
+  server counts such a peer as willing, so a cluster of old and new servers still elects.
+  Any other failure is not a yes.
+- **A request from a peer ends its reconnect backoff.** gRPC waits between attempts to an
+  unreachable peer, up to 120 seconds, so a follower that returned after a long stop could
+  go unheard by the leader for most of that time. `RaftNode` reports every vote and
+  pre-vote request from a configured server to `RaftTransport.peerHeardFrom`, and
+  `GrpcRaftTransport` resets its channel's connect backoff to that peer. Resetting on
+  proof of life keeps gRPC's backoff for peers that are really down.
+
+**Leader stickiness.** A leader ignores campaigns while check-quorum allows it to lead. A
+follower ignores vote requests, including higher terms, for the minimum election timeout
+after leader contact, measured by a monotonic clock. Pre-Vote does not stop a removed
+server from disrupting a cluster (thesis section 4.2.3); stickiness does.
+
+**Check-quorum.** A leader steps down in its current term, failing uncommitted writes,
+when a majority including itself has not acknowledged any request for an election
+timeout's worth of heartbeat rounds. Counting applied rounds rather than wall-clock time
+means a delayed state loop cannot cause a false step-down. A single-node cluster never
+steps down.
+
+**Changing a transition.** A change that removes or alters a state transition first lists
+the old transition's observable effects (term, role, known leader, timers, readiness),
+marks each removed or kept, and has a test for every kept effect before the code changes.
+Pre-Vote's removal of the candidate transition from the election timeout also removed its
+clearing of the known leader, which is why a round now forgets a silent leader.
+
+**Other transport rules.** A refused transition at shutdown, from a draining sequencer,
+is expected and logged at debug by `TransitionFailureLog`, which every handler of a
+sequenced failure uses. Snapshot sends to an unreachable lagging peer back off from
+250 ms to 5 seconds, doubling per failure; a delivered snapshot or a new leadership
+starts again.
+
+### 8.5 Write forwarding
+
+As Consul's servers do, a follower that knows the leader forwards every write (`PUT`,
+`POST`, `DELETE` and `PATCH`) to it with the Raft port's `Forward` call, which carries the
+method, path, query, headers and body, under the port's mutual TLS when it is on.
+
+- The leader answers on its own routes, with its ACLs, tenancy, audit and limits. The
+  follower answers with that answer and `X-Qraft-Forwarded-To`, once it has applied the
+  leader's index, so its own reads see the write.
+- A forwarded write carries `X-Qraft-Forwarded-By` and is never forwarded again: one that
+  reaches a server that does not lead is answered 503 `leader_unavailable`.
+- A write is sent only on a ready connection, waited for at most two seconds. One never
+  sent is 503 `leader_unavailable` with the leader hint, since it was not applied; one
+  sent and not answered is 503 `outcome_unknown`.
+- A follower that stops following that leader while it waits, by hearing nothing from it
+  for an election timeout or by learning of another, answers at once instead of at the
+  end of its wait (twice the Raft timeout). A leader cut off by the network can take the
+  write on a connection that still looks ready and never answer, and a caller with a
+  check to renew needs to try another server in time. A `raft.ForwardCall` is either sent
+  or withdrawn, never both: a call still waiting for its connection is withdrawn and
+  answered `leader_unavailable`; one already sent is answered `outcome_unknown`.
+- A draining server forwards nothing. Reads are not forwarded (section 9.2), nor are the
+  `POST` routes that only read: `/v1/internal/acl/resolve`, `/v1/internal/acl/authorize`
+  and `/v1/acl/explain` are answered by the server asked.
+
+## 9. Consistency and replica determinism
+
+### 9.1 Writes
+
+Every write is acknowledged after commit and state-machine application. A write's
+failure is one of: a definite refusal (a 4xx envelope, `retryable: false`); a retryable
+refusal known not to have been applied (`leader_unavailable`, `draining`); or
+`outcome_unknown`, which may have been applied and so is answered `retryable: false`. A
+caller recovers from an unknown outcome by reading authoritative state or by replaying an
+idempotent request; observations and registrations are designed so that a replay is
+safe.
+
+### 9.2 Read modes
+
+Every catalog, health and key/value read takes the same options:
+
+- **Default and `?stale`** answer from the answering server's applied state. Consul's
+  default reads go to the leader through server-side forwarding; Qraft does not forward
+  reads, and making the default leader-only would refuse every read a follower answers.
+  So the default is a stale read with the known-leader headers below, a difference from
   Consul.
-- **Every read** carries `X-Qraft-Known-Leader` and `X-Qraft-Last-Contact`, the
-  milliseconds since the answering server heard from the leader, 0 on the leader,
-  and, since 2026-11-15, `X-Qraft-Consistency`, the mode it applied: `default`,
-  `consistent` or `stale`. A refused read carries none of the three.
-- **Every answer** of the server's HTTP API, a refusal and an unrouted path
-  included, names the server that gave it in `X-Qraft-Answered-By`, its node ID
-  (since 2026-11-15, for the administrative interface's read metadata, UI-4).
-- **Blocking queries**: `?index=N&wait=D` waits until the index the read answers
-  with, the key/value state's last index for `/v1/kv` and the applied index for the
-  catalog, passes `N`, or `D` passes with up to a sixteenth more at random, as in
-  Consul; `wait` is 5 minutes by default and at most 10. The client forwards a
-  blocking read with its wait added to its request timeout.
-- **Writes are forwarded to the leader**, since 2026-11-08
-  ([`task-list-write-forwarding-2026-11-08.md`](../docs/archive/task-list-write-forwarding-2026-11-08.md)),
-  as Consul's servers forward: a follower that knows the leader sends a `PUT`,
-  `POST` or `DELETE` to it with the Raft port's `Forward` call, which carries the
-  method, path, query, headers and body under the port's mutual TLS when it is on.
-  The leader answers it on its own routes, with its ACLs, tenancy, audit and limits,
-  and the follower answers with that answer and `X-Qraft-Forwarded-To`. A forwarded
-  write carries `X-Qraft-Forwarded-By` and is never forwarded again. The follower
-  answers once it has applied the leader's index, so its own reads see the write. A
-  write is sent only on a ready connection, waited for at most 2 seconds: one never
-  sent is answered 503 `leader_unavailable` with the hint, and one sent and not
-  answered 503 `outcome_unknown`. A follower that stops following that leader while it
-  waits, by hearing nothing from it for an election timeout or by learning of another,
-  answers 503 `outcome_unknown` at once instead of at the end of its wait, which is
-  twice the Raft timeout: a leader cut off by the network can take the write on a
-  connection that still looks ready and never answer, and a caller with a check to
-  renew needs to try another server in time (2026-11-13; `RaftNode`'s leader change
-  listener). A write still waiting for its connection then is withdrawn and never
-  sent, and is answered 503 `leader_unavailable`, since it was not applied
-  (2026-11-15, Jenkins build 80; `raft.ForwardCall`, which is either sent or
-  withdrawn, never both). A draining server forwards nothing. Reads are not forwarded.
-- **The membership** at `GET /v1/operator/raft/members` (since 2026-11-14, for the
-  administrative interface's Operate views): on the leader each configured server, in
-  name order, with its match and next index, its lag behind the leader's last log
-  index, how long since it last answered, whether it is reachable, which is the
-  leader's check-quorum test, an answer within an election timeout of heartbeat
-  rounds, and whether it is healthy, reachable and within 250 entries; and the quorum:
-  voters, the quorum's size, the reachable voters, the failure tolerance, and whether
-  every server is healthy. A follower answers its own view, `view: "follower"`, with
-  the configuration it holds and the leader it knows; the progress fields and the
-  quorum are null, since only the leader has them. Both carry the answering server's
-  name, term, commit and last log index.
-- **The storage** at `GET /v1/operator/raft/storage` (since 2026-11-14): the storage's
-  size and the snapshot's age where the server knows its directory, the snapshot's
-  last index and term, the first log index still held, the last log, commit and
-  applied indexes, fencing and its reason, the transition queue's depth, and the
-  last snapshot that failed since the server started, with its message and time. A
-  snapshot that fails before publication fences nothing; it is recorded here.
-  Both reads need `operator:read`, as the autopilot read does, and take no parameter.
-- **The configuration** at `GET /v1/operator/configuration` (since 2026-11-15, for
-  the administrative interface's Configuration page): the answering server, the
-  file its configuration was read from and when the server was given it, and each
-  setting by its key in the document, such as `server.raft.electionTimeoutMs`, in
-  the document's order, with the value in force, `source` (`configured` when the
-  document gave it, `default` otherwise), `redacted`, and `restartRequired`, which
-  is true of every setting, since none changes while the server runs. A secret is
-  never answered: the operator token's value is withheld, and the telemetry
-  endpoint is given without its user information or query, both marked
-  `redacted`. A file's path is given; what the file holds is not read for it. The
-  read needs `operator:read` and takes no parameter; a server not given its
-  configuration answers 503 `configuration_unavailable`.
+- **`?consistent`** is answered by the leader once `RaftNode.readBarrier()` passes:
+  Raft's ReadIndex. It records the commit index, or the first index of the leader's term
+  if that is later, sends a heartbeat round, and completes once a quorum has answered a
+  request sent after it began and that index is applied. Each AppendEntries request
+  carries the sequence it was sent at, so a late answer to an earlier request confirms
+  nothing. Another server answers 503 `leader_unavailable` with the leader hint, and a
+  client tries its next server. `stale` and `consistent` together are refused.
+- **Headers.** Every read carries `X-Qraft-Known-Leader`, `X-Qraft-Last-Contact` (the
+  milliseconds since the answering server heard from the leader, 0 on the leader) and
+  `X-Qraft-Consistency`, the mode applied. A refused read carries none of them.
+- **Blocking queries.** `?index=N&wait=D` waits until the read's index passes `N`, or `D`
+  passes with up to a sixteenth more at random, as in Consul. `wait` is five minutes by
+  default and at most ten. The client forwards a blocking read with its wait added to its
+  request timeout. A wait ends early when the server stops, answered 503 `draining`.
 
-Deterministic ordering is mandatory for service lists, instances, tags, prefix
-results, and snapshot serialization.
+Operator reads of a server's own Raft view (`/raft/status`, the Raft configuration and
+membership, storage) answer that server's state; the leader alone answers the autopilot
+health read, as only it knows its followers' progress.
 
-### 13.1 Replica determinism
+### 9.3 Ordering
 
-Replicated state must depend only on the committed log. The following rules
-enforce that:
+Deterministic ordering is mandatory for service lists, instances, tags, checks, node
+lists, prefix results and snapshot serialization.
 
-- **Apply what is logged.** A leader encodes each command once. It appends and
-  applies the command decoded from those bytes, not the object it received, so
-  any normalization in the codec is identical on the leader, its followers, and
-  after WAL replay.
-- **Replicated bytes are authoritative.** Every log entry keeps the exact bytes
-  that were replicated. Persistence, sending to followers, and comparing a
-  retransmitted entry with an existing one all use those bytes, never a
-  re-encoding. Protobuf map encoding follows Java map iteration order, which is
-  randomized per JVM, so re-encoding could otherwise make a duplicate entry look
-  like a divergent log and fence a healthy follower.
-- **No clock or randomness during decoding or application.** Times in commands
-  are chosen once, by the proposing server, and stored in milliseconds. An entry
-  without a time decodes to the epoch, not to the replaying node's clock.
-- **Clients do not own server state.** Registration status, registration time,
-  heartbeat time, and observation receipt time come from the receiving server.
-  The node routes refuse a body that carries them, and the state machine sets
-  them again whatever a command holds. An observation's `observedAt` is kept
-  for display.
-- **Lossless encoding.** Nullable strings use protobuf `optional` fields, so null
-  and the empty string stay distinct. Null and empty lists are treated as the
-  same.
-- **Removed formats stay readable.** The fields a node no longer has are
-  `reserved` in the protocol and ignored in a snapshot. A removed node status
-  reads as `healthy` or `unreachable`, by whether the node was in contact. An
-  entry holding the removed capabilities update applies nothing. Fixtures
-  written by the earlier code prove each case.
-- **No shared mutable state.** A node is an immutable value, and the state
-  machine copies what a command's collections hold. Readers receive those
-  values and a read-only catalog view, so nothing outside a committed command
-  can change replicated state.
-- **Reproducible snapshots.** Snapshot JSON writes map entries in key order, so
-  replicas and JVMs produce identical bytes for identical state.
+### 9.4 Replica determinism
 
-## 14. Persistence and upgrades
+Replicated state depends only on the committed log:
 
-### 14.1 Storage boundaries
+- **Apply what is logged.** A leader encodes each command once and appends and applies
+  the command decoded from those bytes, not the object it received, so any normalization
+  in the codec is identical on the leader, its followers and after WAL replay.
+- **Replicated bytes are authoritative.** Every log entry keeps the exact bytes that were
+  replicated. Persistence, sending to followers and comparing a retransmitted entry with
+  an existing one all use those bytes, never a re-encoding. Protobuf map encoding
+  follows Java map iteration order, which differs between JVMs, so a re-encoding could
+  make a duplicate entry look like a divergent log and fence a healthy follower.
+- **No clock or randomness while decoding or applying.** Times in commands are chosen
+  once, by the proposing server, and stored in milliseconds. An entry without a time
+  decodes to the epoch, not to the replaying server's clock.
+- **Clients do not own server state.** Registration status, registration time, heartbeat
+  time and observation receipt time come from the receiving server. The node routes
+  refuse a body that carries them, and the state machine sets them whatever a command
+  holds.
+- **Lossless encoding.** Nullable strings use protobuf `optional` fields, so null and the
+  empty string stay distinct. Null and empty lists are the same.
+- **Removed formats stay readable.** Fields a node no longer has are `reserved` in the
+  protocol and ignored in a snapshot. A removed node status reads as `healthy` or
+  `unreachable`, by whether the node was in contact. An entry holding the removed
+  capabilities update applies nothing. Fixtures written by earlier code prove each case.
+- **No shared mutable state.** A node is an immutable value, and the state machine copies
+  what a command's collections hold. Readers receive those values and a read-only
+  catalog view, so nothing outside a committed command can change replicated state.
+- **Reproducible snapshots.** Snapshot JSON writes map entries in key order, so replicas
+  and JVMs produce identical bytes for identical state.
+- **Decisions in the state machine.** Name ownership (section 5.2), scope existence
+  (section 5.1), ACL refusals (section 11.2), compare-and-set, session ownership,
+  node-scoped identity and observation ordering are decided where the command is
+  applied, from replicated state, so every replica decides alike. Metrics of applied
+  state are counted there too.
 
-Qraft uses RaftLog as a write-ahead log, not as an application database. The WAL
-stores only:
+## 10. Persistence and compatibility
 
-- Current term and voted-for identity.
-- Indexed, termed log entries with opaque command payloads.
-- Suffix-truncation records used to replace a conflicting log suffix.
+### 10.1 Storage boundaries
 
-RaftLog does not interpret commands, answer key/value or catalog queries, run the
-state machine, or own application snapshots. Qraft owns command serialization,
-materialized state, snapshot contents, snapshot transfer, and the relationship
-between a snapshot boundary and the Raft log.
-
-The detailed test-first migration and removal gates are maintained in
-[`RAFTLOG_EXTERNALISATION_TDD_PLAN.md`](../docs/archive/RAFTLOG_EXTERNALISATION_TDD_PLAN.md).
+Qraft uses RaftLog as a write-ahead log, not as an application database. The WAL stores
+only the current term and voted-for identity, indexed and termed log entries with opaque
+payloads, and suffix-truncation records that replace a conflicting suffix. RaftLog does
+not interpret commands, answer queries, run the state machine or own snapshots; Qraft
+owns command serialization, materialized state, snapshot contents and transfer, and the
+relationship between a snapshot boundary and the log.
 
 Production pairs RaftLog's `dev.mars.raftlog.storage.RaftStorage` with Qraft's
 `dev.mars.qraft.raft.api.SnapshotStore` in `RaftStorageFactory.DurableStorage`:
@@ -1974,32 +1213,20 @@ public record DurableStorage(dev.mars.raftlog.storage.RaftStorage wal,
                              SnapshotStore snapshots) { }
 ```
 
-`RaftStorageFactory.createDurable` returns `CompletableFuture<DurableStorage>`.
-Both storage contracts expose native Java futures. `SnapshotStore` opens a node
-directory, saves atomically, loads the latest snapshot, and closes asynchronously
-or through `AutoCloseable`. `Completions` handles completion failures and unwraps
-`CompletionException`; it does not convert futures into another runtime type.
-No semantic WAL adapter exists, so prefix compaction and every other WAL
-operation reach the external implementation directly.
+`RaftStorageFactory.createDurable` returns `CompletableFuture<DurableStorage>`. Both
+storage contracts expose standard Java futures; `Completions` handles failures and
+unwraps `CompletionException` without converting futures into another type.
+`RaftPersistence` passes WAL operations, prefix compaction included, to RaftLog's storage
+unchanged; there is no semantic WAL adapter.
 
-The snapshot store may share a node data directory with the WAL, but it is a
-separate ownership and durability contract. The same directory holds the
-server's `server-id` (section 4.2), written atomically and made durable once,
-at the server's first start, while the WAL holds the directory's lock.
-Snapshot data is an envelope: the cluster
-configuration at the snapshot's last included index, then the state machine's
-snapshot. It is restored with the snapshot and sent with an install.
-Snapshot data, last included index,
-last included term, format version, and checksum are published atomically as one
-recoverable unit.
+The snapshot store may share a node's data directory with the WAL, under a separate
+ownership and durability contract; so does `server-id`. Snapshot data is an envelope: the
+cluster configuration at the snapshot's last included index, then the state machine's
+snapshot. It is restored with the snapshot and sent with an install. Snapshot data, last
+included index, last included term, format version and checksum are published atomically
+as one recoverable unit.
 
-The consensus layer uses standard `CompletableFuture` and `CompletionStage`
-contracts. The former `Future`, `Promise`, and `AsyncResult` wrapper types were
-removed in Phase 7; storage ports and their callers use the Java APIs directly.
-
-### 14.2 Opaque command payloads and materialized state
-
-The KV example in the RaftLog demo establishes the intended separation:
+### 10.2 Opaque command payloads and materialized state
 
 ```text
 domain mutation
@@ -2010,1356 +1237,710 @@ domain mutation
     -> materialized application state
 ```
 
-Qraft follows the same pattern for key/value, catalog, health, tenant, session,
-and lock commands. RaftLog never sees a service ID or key. It sees only command
-bytes. Reads are served from `QraftStateStore` or another materialized projection,
-never by searching the WAL.
+Key/value, catalog, health, node, tenancy, session, lock and ACL commands all follow this
+path. RaftLog never sees a service ID or key, only command bytes. Reads are served from
+`QraftStateStore`, never by searching the WAL. Command application enforces
+compare-and-set indexes, session ownership, node-scoped identity and sequence ordering;
+those rules belong entirely to the deterministic state machine.
 
-Unlike the demo's simple last-write-wins map, Qraft command application also
-enforces compare-and-set indexes, session ownership, node-scoped service identity,
-and health sequence ordering. Those rules belong entirely to the deterministic
-state machine and must produce the same result on every server.
+Command codecs reject truncated payloads, impossible lengths, forbidden trailing data,
+invalid UTF-8 where text is required, and variants missing required fields. The WAL
+checksum protects stored bytes; it does not replace payload validation.
 
-Command codecs must reject truncated payloads, impossible lengths, trailing data
-where the format forbids it, invalid UTF-8 where text is required, and command
-variants missing required fields. The WAL checksum protects stored bytes; it does
-not replace domain-level payload validation.
+### 10.3 Append and conflict-replacement contract
 
-### 14.3 Append and conflict-replacement contract
+Leader submission:
 
-Leader submission uses this order:
-
-1. Allocate the next log index and encode the command without mutating memory.
-2. Call `appendEntries` with the indexed and termed payload.
+1. Allocate the next index and encode the command without changing memory.
+2. Call `appendEntries` with the indexed, termed payload.
 3. Call `sync`, the durability barrier.
-4. Only after successful sync, add the entry to the in-memory log.
-5. Replicate it and acknowledge the client only after Raft commit and application.
+4. Only after a successful sync, add the entry to the in-memory log.
+5. Replicate it, and acknowledge the client only after commit and application.
 
-Follower `AppendEntries` handling uses prepare, persist, then apply:
+Follower `AppendEntries` is prepare, persist, then apply:
 
-1. Validate the preceding index and term. A preceding index inside the
-   follower's snapshot is accepted without comparison: every entry a snapshot
-   covers is committed, so it is identical on the leader. Rejecting it would
-   leave a follower that compacted after a retransmission unable to catch up.
-2. Calculate a side-effect-free append plan from the request and in-memory log.
+1. Validate the preceding index and term. A preceding index inside the follower's
+   snapshot is accepted without comparison: every entry a snapshot covers is committed,
+   so it is identical on the leader, and refusing it would leave a follower that
+   compacted after a retransmission unable to catch up.
+2. Calculate a side-effect-free append plan from the request and the in-memory log.
 3. If required, call `truncateSuffix(conflictIndex)`.
-4. Append only the new entries from the plan.
-5. Call `sync` once for the complete truncate-and-append batch.
+4. Append only the plan's new entries.
+5. Call `sync` once for the whole truncate-and-append batch.
 6. Apply the same plan to memory.
-7. Only then send a successful RPC response.
+7. Only then answer success.
 
-The request verifies the follower's log only through its last entry, or through
-the snapshot boundary when the request lies inside the snapshot. The follower
-reports that verified index as its match index and advances its commit index to
-no more than `min(leaderCommit, verifiedIndex)`. A longer tail may be an
-uncommitted entry from an earlier term that no conflict has truncated yet.
-Reporting it would let the leader count the follower for entries it does not
-hold, and committing it would apply an entry the cluster never committed.
+A request verifies the follower's log only through its last entry, or through the
+snapshot boundary when it lies inside the snapshot. The follower reports that verified
+index as its match index and advances its commit index to no more than
+`min(leaderCommit, verifiedIndex)`. A longer tail may be an uncommitted entry from an
+earlier term that no conflict has truncated yet: reporting it would let the leader count
+the follower for entries it does not hold, and committing it would apply an entry the
+cluster never committed.
 
-The leader commits index N only when a majority of the whole membership,
-`floor(n / 2) + 1` including itself, has a match index of at least N, and only
-when the entry at N is from its current term. An entry from an earlier term
-commits only as part of a later current-term commit (Raft section 5.4.2). A
-cluster of two therefore needs both members, and a cluster of four needs three.
+The leader commits index N only when a majority of the voters, `floor(n / 2) + 1`
+including itself, has a match index of at least N, and only when the entry at N is from
+its current term; an earlier term's entry commits only as part of a later current-term
+commit (Raft section 5.4.2). A cluster of two therefore needs both voters, and one of
+four needs three. Every new leader appends a no-op in its term, which commits the entries
+before it and gives the leader the current-term commit a configuration change needs.
 
-Every new leader appends a no-op entry in its own term as soon as it is elected.
-Committing it commits the entries before it, and gives the leader the
-current-term commit a configuration change needs (section 4.2), without waiting
-for a client write.
+Committed entries are applied strictly in index order. If the state machine fails to
+apply one, from a local fault or because an older server in a rolling upgrade does not
+know the command, the node **fences**: the applied index stays before the entry and
+nothing after it is applied; the waiting client receives the failure; other pending
+writes fail with an unknown outcome; the node stops its election, heartbeat and snapshot
+timers and reports unready. Skipping the entry would leave that replica silently
+different from every other. Recovery is an operator action: a fix or an upgrade, then a
+restart.
 
-Committed entries are applied strictly in index order. If the state machine
-fails to apply one, whether from a local fault or because an older server in a
-rolling upgrade does not know the command, the node fences:
-- the applied index stays before the entry, and nothing after it is applied;
-- the waiting client receives the failure;
-- other pending writes fail with an unknown outcome;
-- the node stops its election, heartbeat, and snapshot timers, and reports
-  unready.
+An append or sync failure leaves the in-memory log unchanged and fails the response. A
+durability failure that fences the WAL also fences the node; no later operation is
+attempted on the same storage instance.
 
-Skipping the entry would leave that replica silently different from every
-replica that applied it. Recovery is an operator action: a fix or an upgrade,
-then a restart.
+RaftLog's pure `AppendPlan` is the authoritative conflict calculator. Because Qraft keeps
+a sentinel at the snapshot boundary, it supplies the post-snapshot entries as a one-based
+relative view and translates the planned truncation index back to the absolute index.
+Tests cover a compacted log in which a conflict is followed by a matching-term old
+suffix; the whole suffix must still be appended again after truncation.
 
-An append or sync failure leaves the in-memory log unchanged and produces a
-failed response. A durability failure that fences the WAL also fences the Raft
-node: later operations must not be attempted on the same storage instance.
+Metadata differs from append: `updateMetadata(term, votedFor)` has its own atomic
+durability barrier. A server makes its new term and vote durable before granting a vote
+or answering on the new term; a separate `sync` is neither required nor a substitute.
 
-Qraft uses RaftLog's pure `AppendPlan` as the authoritative conflict calculator.
-Because Qraft retains a sentinel at the snapshot boundary, it supplies the
-post-snapshot entries as a one-based relative view and translates the planned
-truncation index back to the absolute Raft index. Tests cover a compacted log in
-which a conflict is followed by a matching-term old suffix; the whole suffix must
-still be re-appended after truncation.
+### 10.4 Snapshot and prefix-compaction contract
 
-Metadata is different from log append: `updateMetadata(term, votedFor)` includes
-its own atomic durability barrier. A server updates its effective persistent term
-and vote before granting a vote or responding based on the new term. A separate
-`sync` call is neither required nor a substitute for this guarantee.
+Every server compacts its own log independently, in any role, on the configured snapshot
+interval and threshold. A follower that never compacted would hold every entry in memory
+and in its WAL, replay all of them on restart, and once elected refuse writes at the log
+hard limit until its first snapshot. A snapshot covers only applied, and so committed,
+entries, so it is safe in any role; it runs through the transition sequencer like every
+other state change.
 
-### 14.4 Snapshot and prefix-compaction contract
+Prefix compaction is safe only after a covering snapshot is durable:
 
-Every server compacts its own log independently, in any role, on the configured
-snapshot interval and threshold. A follower that never compacted would hold every
-entry in memory and in its WAL and replay all of them on restart. Once elected, it
-would also refuse writes at the log hard limit until its first snapshot. A
-snapshot covers only applied, and therefore committed, entries, so it is safe in
-any role; it runs through the transition sequencer like every other state change.
-
-Prefix compaction is safe only after a covering application snapshot is durable.
-The required order is:
-
-1. Choose `lastApplied` as the snapshot boundary and resolve its exact term.
+1. Choose `lastApplied` as the boundary and resolve its exact term.
 2. Capture a deterministic state-machine snapshot for that boundary.
-3. Atomically and durably publish the snapshot and boundary metadata through
+3. Publish the snapshot and boundary metadata atomically and durably through
    `SnapshotStore`.
-4. Call `RaftWal.truncatePrefix(lastIncludedIndex)`.
-5. After successful durable compaction, trim the corresponding in-memory prefix
-   and retain a sentinel containing the included index and term.
+4. Call `RaftPersistence.truncatePrefix(lastIncludedIndex)`, which is RaftLog's
+   `truncatePrefix`.
+5. After durable compaction, trim the in-memory prefix and keep a sentinel holding the
+   included index and term.
 
-`truncatePrefix` is itself a durability barrier; an extra `sync` is not required.
-It removes entries at indexes less than or equal to the supplied boundary while
-retaining original indexes, terms, payloads, and replay order for later entries.
+`truncatePrefix` is itself a durability barrier. It removes entries at or below the
+boundary while keeping original indexes, terms, payloads and replay order for later
+entries.
 
-Failure behavior is deliberate:
+- A snapshot publication failure leaves the WAL and memory unchanged. A snapshot that
+  fails before publication fences nothing; the storage read reports it.
+- A crash after publication but before compaction is safe; recovery ignores replayed
+  entries at or below the boundary.
+- A compaction failure leaves memory untrimmed and may fence the WAL.
+- A successful compaction is never paired with an absent or volatile snapshot; recovery
+  checks for this pairing and refuses it (section 10.5).
+- Installing a snapshot from a leader uses the same publish-before-compact order before
+  changing the follower's in-memory state.
 
-- Snapshot publication failure leaves the WAL and memory unchanged.
-- A crash after snapshot publication but before compaction is safe; recovery may
-  ignore replayed entries at or below the snapshot boundary.
-- Compaction failure leaves memory untrimmed and may fence the WAL.
-- A successful compaction must never be paired with an absent or volatile
-  snapshot. Recovery checks for this pairing and refuses it (section 14.5).
-- Installing a snapshot from a leader uses the same publish-before-compact order
-  before changing the follower's in-memory state.
+`FileSnapshotStore` publishes snapshots durably and atomically.
 
-The implementation satisfies this contract. `FileSnapshotStore` publishes
-snapshots durably and atomically, and prefix compaction calls RaftLog's real
-`truncatePrefix`. The former in-memory snapshot adapter and its no-op prefix
-truncation have been removed.
+### 10.5 Recovery contract
 
-### 14.5 Recovery contract
+Recovery:
 
-Recovery proceeds by:
+1. loads term and vote metadata;
+2. loads the latest valid snapshot;
+3. restores the state machine and its included index and term;
+4. replays the WAL in its original index order;
+5. rejects entries that overlap the snapshot with a conflicting term. A follower
+   publishes an installed snapshot before it removes the WAL suffix that conflicts with
+   it, so a crash between the two leaves an entry at the boundary with another term.
+   Recovery discards that entry and every later one, which belong to the history the
+   snapshot replaced, and completes the interrupted compaction in an owned transition
+   before the node starts. Such entries are never replayed or applied;
+6. applies eligible committed entries strictly after the boundary.
 
-1. Loading term and vote metadata.
-2. Loading the latest valid application snapshot.
-3. Restoring the state machine and its included index and term.
-4. Replaying the WAL in its original index order.
-5. Rejecting entries that overlap the snapshot with a conflicting term. A
-   follower publishes an installed snapshot before it removes the WAL suffix that
-   conflicts with it, so a crash between the two leaves a WAL entry at the
-   snapshot boundary with another term. Recovery then discards that entry and
-   every later one, which belong to the history the snapshot replaced, and
-   completes the interrupted WAL compaction in an owned transition before the
-   node starts. Such entries are never replayed or applied.
-6. Applying eligible committed entries strictly after the snapshot boundary.
+RaftLog may repair only a structurally incomplete final record left by a torn write.
+Complete records with bad checksums, malformed headers or ambiguous interior corruption
+are recovery failures and fence the instance; Qraft never replaces them with empty
+state. After prefix compaction the first replayed entry may have an index above one, so
+recovery validates continuity relative to the snapshot boundary.
 
-RaftLog may repair only a structurally incomplete final record caused by a torn
-write. Complete records with bad checksums, malformed headers, or ambiguous
-interior corruption are recovery failures and fence the instance; Qraft must not
-silently replace them with empty state.
+- **An interrupted first snapshot.** A temporary snapshot file with no published
+  snapshot is what a kill leaves between creating that file and renaming it, during the
+  first snapshot a server writes or installs; the WAL is complete at that moment, by the
+  order of section 10.4. `FileSnapshotStore.open` moves the file to
+  `snapshot.dat.interrupted`, keeping one such file as evidence, and the server starts
+  from its WAL.
+- **A missing snapshot.** After replay, recovery compares the index the WAL is compacted
+  through, from `compactionBoundary()` of RaftLog's storage interface, with the index the
+  published snapshot reaches. If the WAL is ahead, a published snapshot is missing or was
+  replaced by an older one, and the entries between are gone: recovery fails, the node is
+  fenced, and the server stays live and unready, as for a corrupt WAL. The interface's
+  default answers 0, for a storage that never compacts, so an implementation that
+  compacts must override it to be checked.
+- **No rollback of a voter.** Restart recovery assumes the server's last durable state.
+  An offline copy that predates later participation cannot replace it under the same
+  server ID: it may erase persisted votes or acknowledged entries. The same-identity
+  restore restriction and the healthy-quorum replacement procedure are in
+  [`docs/OPERATIONS.md`](../docs/OPERATIONS.md#restoring-storage-without-rolling-back-a-voter).
+- **Lost quorum.** Lost-quorum recovery and whole-cluster restore from backup are
+  supported only through the offline `qraft operator raft inspect` and `recover`
+  commands (`server.recovery`). `recover` copies a stopped source directory, appends one
+  configuration entry listing a single voter under a newly generated server ID in a term
+  above the source's, replaces `server-id` and publishes the copy by rename; the WAL,
+  snapshot, metadata and wire formats do not change. A claim file beside the source
+  makes recovery one-time, and an interrupted run can be repeated safely. Server-ID
+  fencing keeps the recovered cluster apart from an old majority that is restarted: the
+  seed and the servers that join it refuse appends and snapshots meant for old IDs, the
+  old configuration counts no reply from the new IDs, and the recovered leader ignores
+  old campaigns. Other servers rejoin empty under new IDs. A restore keeps what preceded
+  the backup and nothing after it. The procedure is in
+  [`docs/OPERATIONS.md`](../docs/OPERATIONS.md#recover-a-cluster-that-lost-its-quorum).
 
-The WAL holds the physical log, while Qraft owns the logical snapshot boundary.
-After prefix compaction, the first replayed entry may have an index greater than
-one. Recovery validates continuity relative to the snapshot boundary rather than
-assuming that every WAL begins at index one.
+### 10.6 Concurrency and ownership
 
-**An interrupted first snapshot, and a missing one.** Changed on 2026-10-10;
-[`TEST-RESULTS.md`](../docs/TEST-RESULTS.md) has the evidence.
+Each server has one open WAL instance and one exclusive data-directory lock. RaftLog owns
+and serializes its blocking file operations; Qraft adds no executor that lets WAL
+operations reorder, and never opens two storage instances over one directory. A storage
+future completing means the operation reached the guarantee that method documents, not
+that a command is committed or applied; Raft owns the persisted, committed and applied
+indexes.
 
-- A temporary snapshot file with no published snapshot is what a kill leaves
-  between the creation of that file and its rename, during the first snapshot
-  a server ever writes or installs. The WAL is complete at that moment, by the
-  order of section 14.4. `FileSnapshotStore.open` moves the file to
-  `snapshot.dat.interrupted`, keeps one such file as evidence, and the server
-  starts from its WAL. Until this change it refused to start.
-- Recovery enforces the rule of section 14.4 that a successful compaction is
-  never paired with an absent snapshot. After the WAL is replayed, it compares
-  the index the WAL is compacted through with the index the published
-  snapshot reaches. If the WAL is ahead, a published snapshot is missing or
-  has been replaced by an older one, and the entries between are gone.
-  Recovery then fails, the node is fenced, and the server stays live and
-  unready, as it does for a corrupt WAL. Until this change a server of a
-  larger cluster in that state started empty, with its term and vote kept,
-  and a server with an older snapshot started with the entries between
-  missing.
-- The compaction index comes from `compactionBoundary()` of RaftLog's storage
-  interface, which `raftlog-core` has had since 1.5.0. Its file storage
-  reports the index it recorded. The interface's default answers 0, for a
-  storage that never compacts, so an implementation that compacts must
-  override it to be checked. Until 2026-10-11 `RaftPersistence` tested for
-  the class of the file storage, because the interface did not have the
-  method.
+### 10.7 Version alignment
 
-Restart recovery assumes the server's last durable state. An offline copy that
-predates later participation cannot replace that state under the same voter ID:
-it may erase persisted votes or acknowledged entries. The supported same-identity
-restore restriction and healthy-quorum replacement procedure are in
-[`RAFT_STORAGE_OPERATIONS.md`](../docs/RAFT_STORAGE_OPERATIONS.md#restoring-storage-without-rolling-back-a-voter).
-Lost-quorum recovery and whole-cluster backup restore are supported only through
-the offline `qraft operator raft inspect` and `recover` commands (membership
-Step 7, verified 2026-10-24). `recover` copies a stopped source directory,
-appends one configuration entry that lists a single voter under a newly generated
-server ID in a term above the source's, replaces `server-id` and publishes the
-copy by rename; the WAL, snapshot, metadata and wire formats do not change. A
-claim file beside the source makes the recovery one-time, and an interrupted run
-is repeated safely. Server-ID fencing keeps the recovered cluster apart from an
-old majority that is restarted: the seed and the servers that join it refuse
-appends and snapshots meant for old IDs, the old configuration counts no reply
-from the new IDs, and the recovered leader ignores old campaigns. Other servers
-rejoin empty through the ordinary join path under new IDs. A restore from a
-backup keeps what preceded the backup and nothing after it. The procedure and its
-observed results are in
-[`RAFT_STORAGE_OPERATIONS.md`](../docs/RAFT_STORAGE_OPERATIONS.md#recover-a-cluster-that-lost-its-quorum).
+Qraft pins a RaftLog version whose interface and behaviour match its use: the root POM's
+`raftlog.version`, 1.5.0, which provides `compactionBoundary()`.
+`RaftLogStorageIntegrationTest` exercises the real library. Every upgrade needs contract
+tests against the real `FileRaftStorage` for metadata durability across reopen; append,
+sync, close, reopen and replay; atomic suffix replacement and replay; durable snapshot
+publication followed by compaction and recovery; compaction failure without premature
+in-memory trimming; corrupt-interior failure and torn-tail recovery; and exclusive
+directory locking with rejection after fencing.
 
-### 14.6 Concurrency and ownership
+### 10.8 Application-format compatibility
 
-Each node has one open WAL instance and one exclusive data-directory lock. RaftLog
-owns and serializes its blocking file operations. Qraft must not add a second
-executor that permits WAL operations to reorder, and it must not open two storage
-instances over the same directory.
+- Existing protobuf field numbers are never reused, and new scalar fields have safe
+  defaults.
+- Catalog entries that omit scoped identity load with tenant and namespace `default`,
+  empty datacenter and region, and enabled; no operator action or offline rewrite is
+  needed.
+- Snapshot readers accept older documents that omit newer sections: a snapshot without
+  key/value, session, tenancy or ACL sections restores their initial state; a fixture
+  written before ACLs proves it for the ACL section. Whole-node recovery still needs the Raft
+  configuration envelope; a readable legacy payload does not imply startup compatibility.
+- Older WAL entries stay readable during the migration window, including JSON
+  distributed-state entries from before catalog replication, which the command codec
+  still decodes.
+- Corrupt or incomplete payloads fail recovery clearly rather than being read as empty
+  commands.
+- An entry holding a command this server does not know, one a newer server wrote, is
+  refused rather than read as a no-op: a follower refuses the append and a recovering
+  server stops until it is upgraded. So in a rolling upgrade every server runs the new
+  version before the new commands are used. Unknown fields inside a known command are
+  still read past.
+- Upgrade fixtures capture command and snapshot bytes before an identity change, such as
+  `fixtures/node-identity/`, which shows entries and snapshots from before node IDs
+  loading without one.
 
-The storage future completing means the operation reached the guarantee documented
-by that method; it does not mean a command is committed or applied. Raft owns the
-separate persisted, committed, and applied indexes.
+The upgrade procedure is in
+[`docs/OPERATIONS.md`](../docs/OPERATIONS.md#rolling-upgrade).
 
-### 14.7 Version alignment
+## 11. Security
 
-Qraft must pin a RaftLog version whose published interface and behavior match
-Qraft's use of it. The root POM pins `raftlog.version` (currently 1.5.0), and
-`RaftLogStorageIntegrationTest` exercises the real library.
+Tenant and namespace identity is carried through the request context, commands, stored
+keys, queries, snapshots, events and audit records. Authentication establishes a
+principal; authorization decides what it may do where. The request context is an
+interface (`server.http.RequestContext`, implemented by `TokenRequestContext`), so the
+caller's choice of scope and node is separate from the token that authorizes it, and
+catalog commands do not depend on how a caller was authenticated.
 
-Every upgrade requires contract tests against the real `FileRaftStorage` for:
+### 11.1 Security profile and startup checks
 
-- Metadata durability across close and reopen.
-- Append, sync, close, reopen, and replay.
-- Atomic suffix replacement followed by replay.
-- Durable snapshot publication followed by prefix compaction and recovery.
-- Compaction failure without premature in-memory trimming.
-- Corrupt interior record failure and torn-tail recovery.
-- Exclusive directory locking and post-fence operation rejection.
+- `server.security.profile` is `development` (the default) or `production`, which refuses
+  to start without enabled ACLs and default policy `deny`.
+- At startup a server logs its ACL settings without secrets, and one warning: with ACLs
+  disabled, that every call is allowed, or, when the default policy is `deny`, the
+  critical warning `ACL_DENY_NOT_ENFORCED`; with ACLs enabled and a listener without TLS,
+  that tokens sent to it cross the network unencrypted, naming the listener and setting.
+  A client logs the same `ACL_DENY_NOT_ENFORCED` warning.
+- A secret is never logged or quoted, at any level, by either mode.
 
-### 14.8 Application-format compatibility
+### 11.2 Access control lists
 
-Compatibility rules:
+ACLs follow Consul's model.
 
-- Existing protobuf field numbers are never reused.
-- New scalar fields have safe defaults.
-- Legacy catalog entries that omit scoped identity load with tenant and namespace
-  `default`, empty datacenter and region, and `enabled=true`; no operator action
-  or offline rewrite is required.
-- Application snapshot payload readers accept older documents that omit newer
-  catalog sections. A snapshot without an `acl` section restores the initial ACL
-  state (section 15.1), proved by a fixture written before ACLs. Whole-node recovery still requires the Raft configuration
-  envelope; legacy payload readability does not imply startup compatibility.
-- Mixed legacy and current WAL entries remain readable during the supported
-  migration window.
-- Corrupt or incomplete payloads fail recovery clearly rather than being silently
-  interpreted as empty commands.
-- An entry that holds a command this server does not know, one a newer server
-  wrote, is refused rather than read as a no-op (since 2026-11-05): a follower
-  refuses the append, and a recovering server stops, until it is upgraded. So in
-  a rolling upgrade every server runs the new version before the new commands are
-  used.
-
-Before changing catalog identity, tests must capture legacy snapshots and command
-bytes as immutable fixtures.
-
-### 14.9 Membership and restart behaviour verified in containers
-
-Membership Step 8 ran each scenario below against a real three-server cluster in
-containers, with the operator command run from the image. The task list holds
-the evidence and the build numbers.
-
-| Scenario | What was shown |
-|---|---|
-| Wipe and replace at the same name and address | The empty server takes a new ID. Its join is refused while the old entry holds the name; it bootstraps nothing and accepts nothing meant for the old ID. A wrong-token removal changes nothing; the right token removes the entry, and the replacement joins, is promoted, and keeps its identity and vote across a restart. |
-| Grow 3 to 5 and shrink 5 to 3 with a client publishing | Servers join as non-voters and are promoted; changes meet the single-change rule under concurrent joins and removals; every acknowledged registration survives. |
-| Leader removes itself | It commits its removal, steps down, reports `removed` and is not ready; the other two elect one leader. |
-| Failed-voter cleanup | Blocked at the voter minimum, removed when a replacement's promotion commits, persisting across restarts. A returning peer restarts its failure clock; a failed voter is removed by a periodic pass with no join. |
-| Removed server that keeps asking for pre-votes | Cut off, removed, then restored, it asks without taking a term and changes nothing for the live voters; killing the leader still lets the rest elect another. |
-| Lost-quorum recovery | See 14.5. |
-
-Limitations recorded by that work:
-
-- A voter that returned after a long stop used to depose a healthy leader for a
-  few seconds: leader stickiness ignored its vote requests, but the higher term it
-  had reached was accepted from its AppendEntries response (Raft thesis, section
-  9.6). Pre-Vote, added on 2026-10-25, prevents it (section 14.10).
-- A removed server does not learn it was removed and asks for pre-votes
-  indefinitely. The live voters refuse, so it never raises a term and is harmless
-  to the cluster (since 2026-11-07 it may take the live voters' term from their
-  refusals, section 14.10), but it should be stopped.
-- Automatic cleanup's failure clocks are the current leader's, so a leadership
-  change restarts the grace.
-- A refused transition at shutdown (a sequencer that is draining) is expected and
-  logged at debug by one class, `TransitionFailureLog`, used by every handler that
-  logs a sequenced failure except the election start, which also treats a fenced
-  sequencer as expected. Snapshot sends to an unreachable lagging peer back off
-  from 250 ms to 5 seconds.
-
-### 14.10 Pre-Vote
-
-An election timeout no longer raises a term. A voter with at least one other voter
-first sends each of them a `PreVote` request for the next term (its current term
-plus one) and starts the real election only when a quorum, itself included, would
-vote for it. The rules, from the Raft thesis section 9.6 and etcd:
-
-- **A receiver changes nothing.** It records no vote, adopts no term and does not
-  count the sender as a leader.
-- **A receiver says yes only if** it is running; the sender is a voter in its
-  configuration (a server with no configuration yet cannot check, and answers by
-  the other rules, or a first server that bootstrapped alone could never be
-  elected); it is not a leader and has heard from none within an election timeout
-  (the test the real vote uses, one method); the proposed term is strictly ahead of
-  its own; and the sender's log is at least as up to date as its own.
-- **A round forgets a silent leader.** A follower whose election timeout fires has not
-  heard its leader for a whole timeout, so it stops reporting that leader (and its
-  readiness fails) as it does when it becomes a candidate. A heartbeat restores it.
-  Without this a cut-off follower would keep claiming readiness, since it no longer
-  becomes a candidate.
-- **A round ends on a no, on silence, or on a heartbeat.** The election timer is
-  re-armed when the round starts and its generation is checked when an answer
-  arrives, so a heartbeat in the meantime cancels the round. The next election
-  timeout asks again.
-- **A later term in an answer is adopted**, as for a vote: the asking server
-  persists it, becomes a follower in it, and its next round asks beyond it. A
-  voter answers with its own term and grants only a term beyond it, so such an
-  answer is always a refusal from a server already in a later term. Only a
-  configured server's answer counts. `hashicorp/raft`'s `runCandidate` does the
-  same ("Check if the term is greater than ours, bail"), and so does etcd.
-  Until 2026-11-07 the term was not adopted, on the reasoning that the leader's
-  heartbeat carries it; with no leader nothing does, and on 2026-11-06
-  `DockerClientTopologyTest` met the deadlock that follows: one server behind in
-  term with the longer log, another ahead in term with the shorter log, each
-  refusing the other's pre-vote for ever. The owner decided on 2026-11-07 to
-  adopt the term (`RaftNode.sequencePreVoteHigherTerm`, through the transition
-  sequencer like a vote answer's later term). Unlike `hashicorp/raft`, a
-  pre-vote is still granted only for a term strictly ahead of the receiver's.
-- **A sole voter skips the round**, as it skips voting.
-- **Compatibility.** `RaftTransport.sendPreVote` is a default that fails as
-  unsupported, like `describe` and `join`. `GrpcRaftTransport` turns a peer's
-  `UNIMPLEMENTED` into that failure, and the asking server counts such a peer as
-  willing, so a cluster of old and new servers still elects. Any other failure is
-  not a yes and is logged as a failed vote request is.
-- **A request from a peer ends its reconnect backoff.** gRPC waits between
-  attempts to a peer it could not reach, up to 120 seconds, so a follower that
-  came back after a long stop could go unheard by the leader for most of that
-  time (54.6 seconds in a local run after a 200 second stop, 0.2 seconds after 70).
-  `RaftNode` calls `RaftTransport.peerHeardFrom(name)` for every vote and pre-vote
-  request from a server in its configuration, answered or refused, and
-  `GrpcRaftTransport` answers with `ManagedChannel.resetConnectBackoff()` on its
-  channel to that peer. The default does nothing, so other transports are
-  unchanged; a server outside the configuration is not reported. Other Raft
-  transports meet the same problem by lowering the ceiling (brunoga/raft: 50 ms
-  to 2 s); resetting on proof of life keeps gRPC's backoff for peers that are
-  really down.
-- **Stickiness stays.** Pre-Vote does not stop a removed server from disrupting a
-  cluster (thesis section 4.2.3); stickiness does. CheckQuorum stays so that a
-  leader that cannot reach a quorum steps down.
-
-Verified by: the receiver and candidate tests with held transports and manual
-timers; a gRPC round trip and the old-server case; a deterministic reproduction of
-the incident (ten election timeouts cut off raise no term, where they reached term
-ten before; the test fails with `expected 0 but was 10` when the round is disabled);
-and a container scenario in which a follower stopped for 200 seconds and restarted
-leaves the leader and term unchanged on every server for 40 seconds (after a 200
-second stop, the longest backoff, and ready within 15 seconds of answering). A partitioned
-follower is covered at both levels: a unit test that a leader silent for a whole
-timeout is forgotten, and a container test that the follower reports unready, never
-leads, never becomes a candidate and keeps its term.
-
-**Removing a transition.** Pre-Vote removed the term raise from the election
-timeout, and with it the candidate transition's other effect, clearing the known
-leader; the first container run on Jenkins found the cut-off follower still ready.
-A change that removes or alters a state transition therefore lists the old
-transition's observable effects first (term, role, known leader, timers, readiness),
-marks each removed or kept, and writes a test for every kept effect before changing
-code.
-
-## 15. Security and tenancy
-
-Tenant and namespace identity must be carried through authentication context,
-commands, stored keys, queries, snapshots, metrics labels, and audit records.
-
-The long-term design does not trust a caller-supplied node or tenant identity.
-Authentication establishes the principal, and authorization maps that principal
-to allowed tenants, namespaces, nodes, services, and operations.
-
-Initial development may use explicit identity headers in a trusted environment,
-but the boundary must be isolated behind a request-context interface so token or
-certificate authentication can replace it without changing catalog commands.
-
-### 15.1 Replicated ACL state
-
-Built from 2026-11-04 to 2026-11-07 by Phases 1 to 9 of
-[`task-list-acl-and-tokens-2026-11-07.md`](../docs/archive/task-list-acl-and-tokens-2026-11-07.md),
-on Consul's model. A server enforces it on its own listeners (Phase 4) and serves
-the ACL API (Phase 5); a client sends its tokens and decides its own local API
-(Phase 6); node identity is enforced (Phase 7); and expired tokens are refused
-and deleted (Phase 8).
-
-- **What is replicated.** Tokens, policies, roles, and a bootstrap index, in
-  `state.acl.AclState`, changed only by `AclCommand` and read through the
-  read-only `QraftStateStore.getAcl()`. A token has an accessor ID, the SHA-256
-  hash of its secret, a description, links to policies and roles, node and
-  service identities, a creation time, an optional expiry, and a mark for a
-  token installed from the management file. A policy holds typed rules
-  (`common.acl.AclRules`), so that the client's authorizer can share the model.
-- **No secret is replicated.** A secret is hashed before its command is proposed,
-  so the WAL, snapshots and backups hold only hashes, following ZooKeeper's
-  digest scheme rather than Consul. A token is found by the hash of what a caller
-  presents.
-- **Built in.** The `global-management` and `builtin/global-read-only` policies
-  and the anonymous token, with Consul's IDs, are part of every server's initial
-  state. The built-ins cannot be deleted, and the policies' rules cannot change.
-- **Decided by the state machine,** from the replicated state, so every replica
-  decides the same, and refused with a code (`RaftCommandResult.Refused`): a
-  secret or expiry that an update changes; an ID, name or secret already in use;
-  a link to a policy or role that does not exist; a reserved ID; and a command
-  after which no token would hold `acl:write` without an expiry (the lock-out
-  guard). A policy or role that is linked to can be deleted, and its links are
-  dropped when a token or role is read, as in Consul.
-- **The bootstrap** works once, and again only with the current bootstrap index,
-  which counts the bootstraps applied. Since Phase 3 (2026-11-05) it is reached
-  through `PUT /v1/acl/bootstrap`, and a leader installs the management token
-  from its file through it (section 16).
-- **A command from a newer server** (2026-11-05): an entry whose command field a
-  server does not know is refused rather than read as a no-op, so a follower
-  refuses the append and a recovering server stops until it is upgraded, instead
-  of going on without a change every newer replica applied. Unknown fields inside
-  a known command are still read past (section 14.8).
-- **The authorizer** (Phase 2, 2026-11-05), `common.acl.AclAuthorizer`, is one pure
-  function that the server and the client both use: a token's grants, the default
-  policy and a request in, allow or deny out, with the rule, policy, role or identity
-  that decided, or the default policy. An exact name beats a prefix and a longer
-  prefix a shorter, as in Consul; for an equally specific name the more specific
-  tenant, then namespace, wins; equals merge `deny`, `write`, `read`. A matched
-  `read` refuses a write, and no default policy grants `acl`. A node identity reads
-  services everywhere; a service identity reads those of its own tenant and
-  namespace. Policies are read from Consul's JSON rule form by
-  `common.acl.AclRulesJson`. The lock-out guard decides through the same function.
-- **Enforcement on a server** (Phase 4, 2026-11-06), with ACLs enabled. A request's
-  token, from `X-Qraft-Token` and otherwise `Authorization: Bearer`, is resolved by
-  `server.acl.AclResolver` against the answering server's applied state to an
-  `AclPrincipal`; a request without one acts as the anonymous token. The scope and
-  node headers stay as the caller's choice of where it acts
-  (`server.http.TokenRequestContext`, which replaced `HeaderRequestContext`). Each
-  route then authorizes before it reads or proposes, as the ACL list's proposal 11
-  sets out:
-  - **Writes,** after Consul's `vetRegisterWithACL` and `vetDeregisterWithACL`: a
-    registration needs `node:write` on the name when it creates the node or changes
-    what is recorded for it, and on any other name its node ID holds, which it
-    renames; and `service:write` on the service in its scope, and on the name of the
-    instance it replaces. A heartbeat needs `node:write`; an observation
-    `service:write` on its service. `node:write` on a node removes anything on it;
-    without it a service needs `service:write`, and an unknown service ID is 404
-    `service_not_found`, as Consul's "Unknown service ID".
-  - **Reads are filtered,** never refused for a permission: nodes by `node:read`,
-    services by `service:read`, and an instance needs both, as Consul's
-    `CheckServiceNode.CanRead`; `node-services/{name}` lists nothing without
-    `node:read` on the node. An answer that left anything out carries
-    `X-Qraft-Results-Filtered-By-ACLs: true`.
-  - **Operator:** `operator:read` for `/v1/operator/raft/configuration` and
-    `/raft/status`; `operator:write` for a removal, checked on the receiving server
-    and again by the leader in its own state (`AclRemovalAuthorizer`, behind the
-    membership service's `RemovalAuthorizer`). Every call to the gRPC
-    `DistributedStateService` needs `operator:write` from `x-qraft-token` metadata
-    (`server.api.AclGrpcGuard`), answered `PERMISSION_DENIED` otherwise.
-  - **Refusals:** 403 `token_not_found` ("ACL not found") for a token that names
-    none, and 403 `permission_denied` in the words of Consul's
-    `PermissionDeniedError`, naming the accessor ID, the permission and what it is
-    on; both in the standard envelope with the request ID. A refusal is logged at
-    INFO with the accessor ID, never the secret.
-  - **Open:** `/health/live`, `/health/ready`, the bootstrap, and the administrative
+- **Replicated state.** Tokens, policies, roles, auth methods, binding rules and a
+  bootstrap index, in `state.acl`, changed only by ACL commands and read through the
+  read-only `QraftStateStore.getAcl()`. A token has an accessor ID, the SHA-256 hash of
+  its secret, a description, links to policies and roles, node and service identities, a
+  creation time, an optional expiry, and a mark when it was installed from the management
+  file. A policy holds typed rules (`common.acl.AclRules`), so the client's authorizer
+  shares the model.
+- **No secret is replicated.** A secret is hashed before its command is proposed, so the
+  WAL, snapshots and backups hold only hashes, following ZooKeeper's digest scheme rather
+  than Consul. A token is found by the hash of what a caller presents. A secret is
+  answered only by the create or clone that made it.
+- **Built in.** The `global-management` and `builtin/global-read-only` policies and the
+  anonymous token, with Consul's IDs, are part of every server's initial state. The
+  built-ins cannot be deleted, and the built-in policies' rules cannot change.
+- **Decided by the state machine.** Refused with a code, identically on every replica: a
+  change to a secret or expiry by an update; an ID, name or secret already in use; a link
+  to a policy or role that does not exist; a reserved ID; and a command after which no
+  token would hold `acl:write` without an expiry (the lock-out guard). A linked policy or
+  role can be deleted; its links are dropped when a token or role is read, as in Consul.
+- **One authorizer.** `common.acl.AclAuthorizer` is one pure function used by server and
+  client: a token's grants, the default policy and a request in; allow or deny out, with
+  what decided. An exact name beats a prefix and a longer prefix a shorter, as in Consul;
+  for an equally specific name the more specific tenant, then namespace, wins; equals
+  merge `deny`, `write`, `read`. A matched `read` refuses a write, and no default policy
+  grants `acl`. A node identity reads services everywhere; a service identity reads those
+  of its own scope. Rules use Consul's JSON form (`common.acl.AclRulesJson`). The lock-out
+  guard and `POST /v1/acl/explain` decide through the same function.
+- **Enforcement on a server**, with ACLs enabled. A request's token is resolved
+  (`server.acl.AclResolver`) against the answering server's applied state; a request
+  without one acts as the anonymous token. Each route authorizes before it reads or
+  proposes:
+  - *Writes*, after Consul's `vetRegisterWithACL` and `vetDeregisterWithACL`: a
+    registration needs `node:write` on the name when it creates the node or changes what
+    is recorded for it, and on any other name its node ID holds, which it renames; and
+    `service:write` on the service in its scope, and on the instance it replaces. Since
+    names are held regardless of case, a takeover or replacement of another spelling
+    needs `node:write` on that spelling too. A heartbeat needs `node:write`; an
+    observation `service:write`. `node:write` on a node removes anything on it; without
+    it a service removal needs `service:write`.
+  - *Reads are filtered*, never refused for a permission: nodes by `node:read`, services
+    by `service:read`, an instance by both, as Consul's `CheckServiceNode.CanRead`. An
+    answer that left anything out carries `X-Qraft-Results-Filtered-By-ACLs: true`.
+  - *Operator*: `operator:read` for the Raft status, configuration, membership, storage,
+    autopilot, configuration and event reads; `operator:write` for tenancy changes and a
+    server removal, checked on the receiving server and again by the leader
+    (`AclRemovalAuthorizer`). Every call to the gRPC `DistributedStateService` needs
+    `operator:write` from `x-qraft-token` metadata (`server.api.AclGrpcGuard`).
+  - *ACL API*: `acl:read` or `acl:write`, except the token's own `self`, `authorize` and
+    `resolve`, which answer only for the presenting token. A request cannot delete its
+    own token. With ACLs disabled the ACL API, its auth method, binding rule, login and
+    logout routes included, answers 401 `acl_disabled`.
+  - *Refusals*: 403 `token_not_found` for a token that names none, and 403
+    `permission_denied` in the words of Consul's `PermissionDeniedError`, naming the
+    accessor ID, the permission and its target. A refusal is logged at INFO with the
+    accessor ID, never the secret.
+  - *Open*: `/health/live`, `/health/ready`, the bootstrap and the administrative
     interface's files. With ACLs disabled every request is allowed and a token is
     ignored, as in Consul.
-  - **Not checked again when applied:** the leader authorizes a write from its
-    applied state and the state machine does not, so a follower that is behind may
-    honour a revoked token for a read until it catches up (proposal 10).
-- **The ACL API** (Phase 5, 2026-11-07), `server.http.AclApiRoutes`, after Consul's
-  `agent/acl_endpoint.go` in camel case: tokens (`PUT /v1/acl/token`, the list
-  with `policy`, `role` and `servicename`, read, update, delete, clone and `self`),
-  policies and roles by ID and by name, `POST /v1/internal/acl/authorize` and
-  `resolve`, which answer only for the presenting token, and `POST /v1/acl/explain`,
-  which decides through the same authorizer as enforcement. Everything else needs
-  `acl:read` or `acl:write`. A secret is answered only by the create or clone that
-  made it, never later and never as its hash; a request cannot delete its own token;
-  a policy's rules are given and answered in Consul's JSON form
-  (`AclRulesJson.write` is the inverse of `parse`). With ACLs disabled the API
-  answers 401 `acl_disabled`. `qraft acl` (`runtime.AclCommandLine`) drives it.
-- **The security status** (2026-11-15, for the administrative interface's Status
-  page, UI-5 task list, decision 4), `GET /v1/internal/ui/acl/status`, in
-  `AclApiRoutes`: whether ACLs are enabled, the default policy and the security
-  profile; `transport`, whether the listener serves HTTPS and whether it requires a
-  client certificate; the management tokens, those holding the built-in
-  `global-management` policy directly or through a role, each with its accessor ID,
-  description, expiry and `installedFromFile`; the anonymous token's policies and
-  `writes`, the resources its rules let it write, in name order; `aclWriters`, the
-  tokens that hold `acl:write` without an expiry, decided by the authorizer the
-  lock-out guard uses; and `expiringSoon`, the tokens that expire within
-  `expiringWithinMinutes` (60, since no token lives more than 24 hours), soonest
-  first, with their node and service identities and `holdsAclWrite`; with
-  `readAt`, the server's time. An expired token is left out of every list. It
-  answers this server's applied ACL state, needs `acl:read`, takes no parameter,
-  answers no secret, and with ACLs disabled answers 401 `acl_disabled`, as the rest
-  of the API.
-- **The client** (Phase 6). `client.acl` (section 16) gives the client four tokens,
-  each a mounted file (`client.acl.ClientTokens`): its own for its node's calls,
-  anti-entropy's read and every removal; one for the file's services and checks; a
-  default for a request with none; and a recovery token for its own endpoints with no
-  server. Each call to the servers carries the token the table names
-  (`client.catalog.RequestTokens`, `client.service.ServiceTokens`); an API
-  registration keeps the token it was made with in `registrations.json`, readable
-  only by the client's user. The local API decides for itself
-  (`client.acl.ClientAuthorizer`), with the shared authorizer, from what
-  `POST /v1/internal/acl/resolve` answers for the caller's token
-  (`client.acl.ClientAclResolver`), cached for the shortest time to live of what it
-  holds and, with no server, decided by the down policy. A forwarded read goes under
-  the caller's token, else the default; a sync refused for its token is a warning,
-  counted as synced and tried again at the next pass.
-- **Node identity** (Phase 7): the guards above, stated for the token a client holds,
-  a node identity for its own node: it cannot register, renew, take over or rename
-  another node, and it removes anything planted on its own. Since the catalog holds a
-  name regardless of case, a registration that takes over or replaces another spelling
-  of its name needs `node:write` on that spelling too. This closes the server's
-  half of section 22's question whether the server can trust a node's claim.
-- **Expiry and revocation** (Phase 8). A server refuses a token from its expiry on,
-  by its own clock, as `token_not_found`, and while it leads deletes expired tokens
-  in batches through the replicated command (`server.acl.AclTokenExpiry`). An expiry
-  is between one minute and 24 hours from its creation. A revoked token keeps working
-  on a client until its cache entry expires; a client whose own token is refused logs
-  why and is not ready until a valid token registers it again.
+  - *Not checked again when applied*: the leader authorizes a write from its applied
+    state, and the state machine does not, so a follower that is behind may honour a
+    revoked token for a read until it catches up.
+- **Bootstrap.** `PUT /v1/acl/bootstrap` creates the first management token once, and
+  again only with the current bootstrap index, which an operator writes to
+  `acl-bootstrap-reset` in the leader's data directory. With
+  `server.acl.initialManagementTokenFile`, whenever a server leads and no token has that
+  secret, it installs the token through the bootstrap. While a file is configured and its
+  token is not installed, the bootstrap answers 503 `management_token_pending` and
+  proposes nothing, so no other bootstrap can be applied first; Consul's `initializeACLs`
+  leaves that window open at each first leadership.
+- **Operator token.** With ACLs disabled, a server removal needs `server.operator.token`,
+  which every server should share, since the receiving server and the leader both check
+  it; without it every removal is refused. It cannot be combined
+  with enabled ACLs, where `operator:write` replaces it.
+- **Expiry and revocation.** A server refuses a token from its expiry on, by its own
+  clock, as `token_not_found`, and while it leads deletes expired tokens in batches
+  through the replicated command (`server.acl.AclTokenExpiry`). An expiry is between one
+  minute and 24 hours from creation.
+- **The client.** A client has four tokens, each a mounted file (`client.acl.ClientTokens`):
+  its own for its node's calls, anti-entropy's read and every removal (Consul's `agent`
+  token); one for the configuration file's services and checks (a service may name its
+  own); a default for a request with none; and a recovery token for its own endpoints
+  when no server answers. Each call to the servers carries the token its purpose names.
+  An API registration keeps the token it was made with in `registrations.json`. A token
+  can be replaced while the client runs, with `client:write` on its node, and with token
+  persistence is kept in `acl-tokens.json`, readable only by the client's user.
+- **The client decides its local API** (`client.acl.ClientAuthorizer`), with the shared
+  authorizer, from what `POST /v1/internal/acl/resolve` answers for the caller's token
+  (`client.acl.ClientAclResolver`), cached for the shortest time to live of what it holds
+  and, with no server, decided by the down policy (Consul's `extend-cache`,
+  `async-cache`, `allow` or `deny`). A revoked token keeps working on a client until its
+  cache entry expires. A client whose own token is refused logs why and is not ready until
+  a valid token registers it again. A client's default policy must be the servers'.
+- **Node identity.** A client's token is normally a node identity for its own node: under
+  the write rules above it cannot register, renew, take over or rename another node, and
+  it removes anything planted on its own.
 
-### 15.2 Transport security
+The ACL operator procedures are in
+[`docs/OPERATIONS.md`](../docs/OPERATIONS.md#enable-acls-on-a-new-cluster).
 
-Built on 2026-11-07 by
-[`task-list-transport-security-2026-11-08.md`](../docs/archive/task-list-transport-security-2026-11-08.md),
-on Consul's `tls` stanza. Without `server.tls` and `client.tls`, nothing changes.
+### 11.3 Transport security
 
-- **One material, read once.** `server.tls` names a PEM CA bundle, the server's
-  certificate chain and its PKCS #8 key, RSA or EC (`common.tls.TlsMaterial`). The
-  CA decides whom a server trusts; refusals name the setting and the file, never a
-  key's content. TLS 1.2 is the lowest version, or 1.3 with `minVersion`.
-- **The HTTP listener serves HTTPS or HTTP, never both** (`server.tls.https`). It
-  requires a client certificate from the CA unless `verifyIncoming` is `false`; Consul
-  defaults that to `false`, and Qraft to `true`, so that a stolen token is of no use
-  from a machine without a certificate (ACL list, proposal 14). Health probes on the
-  same listener present a certificate too.
-- **The API gRPC port** (`server.tls.grpc`) follows the same rule.
-- **The Raft port uses mutual TLS** (`server.tls.raft`): a server presents its
-  certificate and requires one from each peer, and checks that a dialled peer's
-  certificate names the host in `server.raft.nodes` unless `verifyServerHostname` is
-  `false` (`raft.GrpcTls`). A peer without a certificate from the CA, or speaking
-  without TLS, takes no part.
-- **A client calls its servers over HTTPS** with `client.tls`'s CA and certificate,
-  and an `https` server URL. A failed handshake is logged once per server and reason,
-  since retrying cannot mend it, and the client is not ready until a server accepts
-  it. Its local API stays HTTP on loopback, as Consul's does by default.
-- **The command lines** take `--ca-file`, `--client-cert` and `--client-key`, and no
+Transport security follows Consul's `tls` stanza. Without `server.tls` and `client.tls`,
+every listener is plain.
+
+- **One material, read once.** A PEM CA bundle, a certificate chain and a PKCS #8 key,
+  RSA or EC (`common.tls.TlsMaterial`). The CA decides whom a server trusts. Refusals name
+  the setting and file, never a key's content. TLS 1.2 is the lowest version, or 1.3 when
+  configured.
+- **The HTTP listener serves HTTPS or HTTP, never both.** It requires a client
+  certificate from the CA unless `verifyIncoming` is `false`. Consul defaults that to
+  `false`; Qraft defaults it to `true`, so a stolen token is of no use from a machine
+  without a certificate. Health probes on that listener present a certificate too. The
+  API gRPC port follows the same rule.
+- **The Raft port uses mutual TLS**: a server presents its certificate, requires one from
+  each peer, and checks that a dialled peer's certificate names the host in
+  `server.raft.nodes` unless `verifyServerHostname` is `false` (`raft.GrpcTls`). A peer
+  without a certificate from the CA, or speaking without TLS, takes no part. Forwarded
+  writes travel over this port.
+- **A client calls its servers over HTTPS** with its CA and certificate and an `https`
+  server URL. A failed handshake is logged once per server and reason, since retrying
+  cannot mend it, and the client is not ready until a server accepts it. Its local API
+  stays HTTP on loopback, as Consul's does by default.
+- **Command lines** take `--ca-file`, `--client-cert` and `--client-key`, never an
   environment variable.
-- **Reloading**, since 2026-11-08 ([`task-list-certificate-reloading-2026-11-08.md`](../docs/archive/task-list-certificate-reloading-2026-11-08.md)):
-  every context and manager made from `TlsMaterial` delegates to its current
-  material, which `reload()` replaces after the checks `load` makes; a server and a
-  client check their files' modification times every 30 seconds and reload on a
-  change. New handshakes use the new material, connections already open keep
-  theirs, and a reload that fails a check is logged at WARN and leaves the material
-  in use.
-- **Not built:** automatic issuance, revocation lists, a reload command, and HTTPS on
-  the client's local API.
-
-### 15.3 Auth methods and audit
-
-Built on 2026-11-08 by [`task-list-authentication-and-audit-2026-11-08.md`](../docs/archive/task-list-authentication-and-audit-2026-11-08.md):
-
-- **Auth methods**, Consul's: a replicated `jwt` method holds PEM public keys, a
-  bound issuer and audiences, claim mappings and leeways, and the longest life it
-  gives a token, 1 hour by default and at most 24. Binding rules bind a login to a
-  service or node identity, a role or a policy, under a selector of
-  `value.<name> == "<text>"` and `"<text>" in list.<name>` clauses.
-- **Login** (`POST /v1/acl/login`) exchanges a valid JWT for a token bound by every
-  matching rule; **logout** deletes it. Deleting a method deletes its rules and its
-  logins' tokens.
-- **Audit events**: every request a server answers under a token is an `AUDIT` event
-  in its journal, with the accessor ID, method, route, status and request ID, and
-  `server.audit.path` writes them as JSON lines. No secret or body is recorded.
-  Since 2026-11-20 the file rotates by size, `server.audit.rotateBytes` and
-  `server.audit.maxFiles`, 24 MiB and 15 files by default, as Consul's audit file sink
-  does ([`task-list-open-items-2026-11-20.md`](../docs/archive/task-list-open-items-2026-11-20.md), decision 4).
-- **The `kubernetes` method**, since 2026-11-08 ([`task-list-kubernetes-auth-method-2026-11-08.md`](../docs/archive/task-list-kubernetes-auth-method-2026-11-08.md)):
-  its configuration is the cluster API's `https` host, its CA and a reviewer service
-  account token, which the API never answers. The server that receives a login asks
-  the cluster's TokenReview API, trusting that CA alone, and an authenticated
-  service account gives the selectors and bind names `serviceaccount.namespace`,
-  `serviceaccount.name` and `serviceaccount.uid`. A token the review does not
-  authenticate is refused 403; an API that cannot be reached or trusted, 503
-  `auth_method_unavailable`. The configuration is replicated in its own field of the
-  method, and a snapshot tells the two types apart by their fields, so a `jwt`
-  method is written as it was before.
-- **Not built:** JWKS, OIDC and AWS methods, audit of anonymous requests, and audit
-  sinks other than a file.
-
-## 16. Configuration
-
-Qraft does not use environment variables for runtime configuration. This rule
-applies to server and client modes, containers, service-manager deployments,
-logging, storage, observability, and secrets. Production code must not call
-`System.getenv` for configuration, configuration files must not interpolate
-environment variables, and there is no environment variable for locating the
-configuration file.
-
-The runtime is started with an explicit mode. Configuration-file discovery has
-the following descending precedence:
-
-1. `--config <path>`;
-2. the `qraft.config` JVM system property;
-3. `config/server.json` or `config/client.json` relative to the working directory;
-4. `/etc/qraft/server.json` or `/etc/qraft/client.json`.
-
-For example:
-
-```text
-qraft server --config /etc/qraft/server.json
-qraft client --config /etc/qraft/client.json
-```
-
-The path names one versioned JSON document. A client document has this shape:
-
-```json
-{
-  "version": 1,
-  "client": {
-    "nodeName": "node-a",
-    "dataDirectory": "/var/lib/qraft",
-    "bindAddress": "127.0.0.1",
-    "httpPort": 8080,
-    "heartbeatIntervalMs": 5000,
-    "shutdownTimeoutMs": 30000,
-    "datacenter": "dc1",
-    "region": "eu-west"
-  },
-  "servers": {
-    "urls": [
-      "http://server-a:8080",
-      "http://server-b:8080",
-      "http://server-c:8080"
-    ],
-    "requestTimeoutMs": 3000
-  },
-  "catalog": {
-    "tenant": "default",
-    "namespace": "default",
-    "registrationRetryMinMs": 250,
-    "registrationRetryMaxMs": 30000,
-    "contactFreshnessMs": 90000,
-    "services": []
-  },
-  "logging": {
-    "directory": "/var/log/qraft"
-  }
-}
-```
-
-`client.dataDirectory` is required. It is checked as a path when the document
-is read, and the client creates it at its first start. `client.nodeName`
-defaults to the machine's host name. The setting `client.id`, which named the
-node before 2026-10-27, is refused like any other unknown setting. The directory
-holds the node ID (section 7.3) and what the local API registered (section 12.1.3).
-
-Every `servers.urls` entry is an HTTP or HTTPS origin. Paths, queries,
-fragments, and user information are rejected. A root trailing slash is removed,
-scheme and host case are normalized, and equivalent origins are deduplicated.
-
-No setting names a version of Qraft. Both modes report the version of their
-build: the project version, which the build writes into the manifest of the
-executable jar. Each mode logs it when it starts, and a client carries it in its
-node's metadata as `qraft.version`. A process that does not run from the jar
-reports `development`.
-
-A server document uses the same envelope and keeps all server settings beneath
-`server`:
-
-```json
-{
-  "version": 1,
-  "server": {
-    "id": "server-a",
-    "http": { "host": "0.0.0.0", "port": 8080 },
-    "apiGrpcPort": 10080,
-    "raft": {
-      "port": 9080,
-      "nodes": {
-        "server-a": "server-a:9080",
-        "server-b": "server-b:9080",
-        "server-c": "server-c:9080"
-      },
-      "electionTimeoutMs": 3000,
-      "heartbeatIntervalMs": 500,
-      "storage": { "type": "raftlog", "path": "/var/lib/qraft", "fsync": true },
-      "snapshot": { "enabled": true, "threshold": 10000, "checkIntervalMs": 60000 },
-      "logHardLimit": 100000,
-      "io": { "poolSize": 10, "queueSize": 1000 }
-    },
-    "telemetry": {
-      "enabled": true,
-      "otlpEndpoint": "http://otel-collector:4317",
-      "prometheusPort": 9464,
-      "serviceName": "qraft-server"
-    },
-    "shutdown": { "drainTimeoutMs": 5000, "timeoutMs": 30000 },
-    "health": { "expiryIntervalMs": 1000, "nodeTtlMs": 90000, "nodeReapAfterMs": 259200000 },
-    "ui": { "enabled": true, "path": "/ui/" }
-  },
-  "logging": { "directory": "/var/log/qraft" }
-}
-```
-
-Listening ports accept 1 to 65535, or 0 to bind any free port:
-
-- This covers `server.http.port`, `server.apiGrpcPort`, `server.raft.port`, and
-  the client's `client.httpPort`.
-- A component reports the port it actually bound, and its startup log names that
-  port. The runtime lifecycle exposes the bound addresses, and their ports, by
-  name: `http`, `raft`, and `apiGrpc` for a server, and `http` for a client.
-
-The client's local API listens on `client.bindAddress`, `127.0.0.1` by default,
-as Consul's `client_addr` defaults to it (since 2026-10-30), so it is reached only
-from the client's own host. The setting is an IP address, IPv4 or IPv6, and a
-host name is refused rather than looked up; `0.0.0.0` listens on every
-interface. Its startup log names where it listens, as Consul's agent does when
-it starts its HTTP server: `Local API started: protocol=http,
-address=127.0.0.1:8080`. A container deployment whose applications do not share
-the client's network namespace sets the bind address, as Consul's `client_addr`
-is set for containers.
-
-The local API is one JDK `HttpServer` (`LocalApiServer`) serving `/health/live`,
-`/health/ready` and the routes of section 12.1.3: `/v1/client/*` and the forwarded
-discovery reads. It shares its request handling with the server's API
-(`common.http.JsonApi`, section 12.1): request IDs, the body limit, the method
-check and the error envelope. Once the client's shutdown begins, before it
-deregisters anything, an API write (any method but `GET` and `HEAD`) is refused
-with 503 `shutting_down`, retryable, so that nothing is registered behind the
-deregistration; reads, liveness and readiness are served until the listener
-stops, last, as Consul's agent stops its HTTP servers after its services and
-checks. Consul's agent does not refuse writes while it leaves; this is
-stricter.
-- `server.raft.port` may be 0 only on a cluster's sole member, because peers dial
-  the configured Raft address.
-
-`server.raft.nodes` lists the servers a server contacts when it forms or joins
-a cluster (section 4.2). A new cluster forms only when every server lists
-exactly the same servers, with the same addresses. Once a server holds Raft
-state, its membership comes from the replicated log, and this setting no
-longer changes it.
-- A server's HTTP, Raft, and API gRPC ports must differ, except that more than
-  one of them may be 0.
-- `server.telemetry.prometheusPort` must be a fixed port.
-
-`server.operator.token` is the token a Raft operator's removal of a server must
-carry while ACLs are disabled (section 12.5). It is optional; without it, every
-such removal is refused. It
-must be at least 16 characters, it is never logged, and every server should
-have the same one, since the server that receives a removal and the leader both
-check it.
-
-`server.acl` and `server.security` (since 2026-11-05, ACL list Phase 3; section
-15.1). These settings decide what a server checks at startup, what it logs,
-whether its bootstrap works, and, since Phase 4 (2026-11-06), whether it
-enforces ACLs on its HTTP API, its removals and its gRPC API, and under which
-default policy.
-
-- `server.acl.enabled` defaults to `false`, as in Consul.
-- `server.acl.defaultPolicy` is `allow` or `deny`, and has no default: enabled
-  ACLs without one are refused before any resource opens.
-- `server.acl.initialManagementTokenFile` names a file holding the first
-  management secret, a UUID outside the range kept for built-ins. It needs
-  enabled ACLs. Whenever a server leads and no token has that secret, it installs
-  the token, through the bootstrap while it is unused, so the file closes the
-  bootstrap endpoint. While a file is configured and no token has its secret,
-  `PUT /v1/acl/bootstrap` answers 503 `management_token_pending`, retryable,
-  and proposes nothing, so no bootstrap can be applied before the file's token
-  (2026-11-07, at the owner's decision; Consul's `initializeACLs` leaves that
-  window open at each first leadership). Once the token is in, the endpoint
-  answers as after any bootstrap, and the reset file works as before. The
-  secret is never logged.
-- `server.operator.token` cannot be used with enabled ACLs: `operator:write`
-  replaces it.
-- `server.security.profile` is `development`, the default, or `production`,
-  which refuses to start without enabled ACLs and `defaultPolicy` `deny`.
-- At startup a server logs its ACL settings without the secret, and one warning:
-  with ACLs disabled, that every call is allowed, or, when `defaultPolicy` is
-  `deny`, the critical warning `ACL_DENY_NOT_ENFORCED` in its place; with ACLs
-  enabled and a listener without TLS, that tokens sent to it cross the network
-  unencrypted, naming the listener and the setting (section 15.2).
-- `PUT /v1/acl/bootstrap` creates the first management token once; afterwards it
-  answers 403 `permission_denied` with the reset index, which an operator writes
-  to `acl-bootstrap-reset` in the leader's data directory
-  (`server.raft.storage.path`) to allow one more. With ACLs disabled it answers
-  401 `acl_disabled`.
-
-`server.tls` and `client.tls` (since 2026-11-07; section 15.2) name the TLS material,
-as Consul's `tls.defaults` does: `caFile`, `certFile`, `keyFile` and `minVersion`
-(`TLSv1.2`, the default, or `TLSv1.3`). A server's also switches each listener on:
-
-```json
-"tls": {
-  "caFile": "/etc/qraft/tls/ca.pem", "certFile": "/etc/qraft/tls/server.pem",
-  "keyFile": "/etc/qraft/tls/server.key",
-  "https": {"enabled": true, "verifyIncoming": true},
-  "grpc": {"enabled": true, "verifyIncoming": true},
-  "raft": {"enabled": true, "verifyServerHostname": true}
-}
-```
-
-The material alone enables no listener, and a listener cannot be enabled without
-`certFile` and `keyFile`. A client's `tls` takes the material only.
-
-`client.acl` (since 2026-11-07, ACL list Phase 6; section 15.1), as Consul's agent
-has its `acl` block. A client decides its own local API, so it needs what a server
-needs to decide, and the tokens it calls the servers with:
-
-```json
-"acl": {
-  "enabled": true, "defaultPolicy": "deny", "downPolicy": "extend-cache",
-  "tokenTtlMs": 30000, "policyTtlMs": 30000, "roleTtlMs": 30000,
-  "enableTokenPersistence": false,
-  "tokens": {"clientFile": "/run/qraft/client-token",
-             "configFileRegistrationFile": "/run/qraft/registration-token",
-             "defaultFile": "/run/qraft/default-token",
-             "recoveryFile": "/run/qraft/recovery-token"}
-}
-```
-
-- `enabled` defaults to `false`. `defaultPolicy` must be the servers'; enabled ACLs
-  without one are refused at startup, and `deny` with ACLs disabled logs the critical
-  warning `ACL_DENY_NOT_ENFORCED`, as on a server.
-- `downPolicy` is `extend-cache` (the default), `async-cache`, `allow` or `deny`,
-  with Consul's meanings; where nothing is cached the default policy decides.
-- Each token is a mounted file. `clientFile` (Consul's `agent`) is for the client's
-  calls for its node and falls back to `defaultFile`; `configFileRegistrationFile`
-  is for the file's services and checks and falls back to `defaultFile`; a service
-  in `catalog.services` may name its own `tokenFile`; `defaultFile` serves a request
-  with none, else the anonymous token; `recoveryFile` writes the client and reads
-  nodes with no server. A file that cannot be read stops the start, and a token is
-  never logged or quoted.
-- `PUT /v1/client/token/{default|client|configFileRegistration|recovery}` replaces a
-  token while the client runs, with `client:write` on its node. With
-  `enableTokenPersistence` it is kept in `acl-tokens.json` in the data directory,
-  readable only by the client's user, and takes its file's place at the next start.
-
-`server.ui` controls the embedded administrative interface (section 12.4):
-
-- `enabled` defaults to `true`. Until authentication exists, the interface is
-  read-only and the server logs a startup warning that it is unauthenticated.
-- `path` defaults to `/ui/`. It must be a lowercase, slash-terminated prefix whose
-  first segment is not `v1`, `api`, `health`, `raft`, `status`, `metrics`, or
-  `debug`.
-- `devAssetsDirectory` is an optional, development-only replacement for the
-  embedded assets. It must exist, contain `index.html`, and accompany an enabled
-  interface.
-
-Service definitions live in the `catalog.services` array; they are not encoded in
-environment variables or discovered through a separate environment-selected
-file. Sensitive material is mounted as a file and referenced by a configuration
-file path when security support lands.
-
-A service entry may carry an optional `checks` array. A check ID is unique on a
-client, across all its services, as Consul's is per agent (since 2026-10-30;
-before that, within its service):
-
-```json
-{
-  "id": "web", "name": "web", "address": "10.0.0.4", "port": 9000,
-  "checks": [
-    {"id": "http", "type": "http", "url": "http://127.0.0.1:9000/health",
-     "intervalMs": 10000, "timeoutMs": 2000, "ttlMs": 30000},
-    {"id": "tcp", "type": "tcp", "intervalMs": 5000, "required": false},
-    {"id": "app", "type": "ttl", "ttlMs": 15000}
-  ]
-}
-```
-
-- `http` issues a GET to an absolute HTTP or HTTPS `url` without user
-  information. A 2xx response is passing, 429 is warning, and any other status or
-  transport failure is critical. The response body is discarded.
-- `tcp` opens one connection to `address` and `port`, which default to the
-  service's own address and port. A connection is passing; anything else is
-  critical. With `warnAfterMs`, a connection that takes at least that long is a
-  warning. The threshold must be shorter than `timeoutMs`, and zero or absent
-  never warns.
-- `ttl` has no probe. An application reports its status through the local API
-  (section 12.1.3). If no
-  report arrives within `ttlMs`, the client records a critical result locally.
-  `ttlMs` is required and it is the only timing setting.
-
-For `http` and `tcp`, `intervalMs` defaults to 10000, `timeoutMs` to the lesser
-of 2000 and the interval, and `ttlMs` to three intervals. The timeout must not
-exceed the interval, and `ttlMs` must exceed it. `ttlMs` is the server-side time
-to live of each published observation. `required` defaults to `true`. Any check
-may set `deregisterAfterMs`: how long the check may stay expired at the server
-before its service is deregistered automatically. It defaults to zero, meaning
-never, and must not be negative. Unknown check settings are rejected.
-
-Each check runs independently on the client. The next attempt starts only after
-the previous one completes or times out, so a check never overlaps itself. A
-timeout cancels the in-flight request or connection and records a critical
-result. Diagnostic output is limited to 4096 characters, matching the server
-limit. Local results never modify server state directly; the client publishes them
-as health observations (section 12.1.1).
-
-Configuration parsing accepts an injected parsed document for deterministic
-tests. Only the executable boundary discovers and opens the configuration file.
-
-Invalid configuration fails before background work starts. Unknown settings,
-missing files, duplicate JSON keys, and environment-style placeholders are
-invalid. A placeholder is any `${` in a string value or field name, in a server
-or client document. The error names its JSON path, such as
-`servers.urls[0]`. A lone `$` is ordinary text.
-
-## 17. Lifecycle and resource ownership
-
-Startup and shutdown are explicit state machines. Suggested runtime states are:
-
-```text
-NEW -> STARTING -> RUNNING -> DRAINING -> STOPPING -> TERMINATED
-                    |
-                    +-----------------------------> FAILED
-```
-
-Each transition is atomic and idempotent. Startup failure closes resources already
-created in reverse order. Shutdown has a total deadline and reports incomplete
-cleanup without waiting indefinitely.
-
-The runtime owns mode selection. The selected mode owns its application service.
-Each service owns its servers, clients, schedulers, storage, and background tasks.
-No component creates an executor that another component is expected to discover
-and close implicitly.
-
-`QraftServerApplication` owns two separate execution resources from
-`dev.mars.qraft.common.async`. `RaftStateLoop` serializes Raft state transitions
-and timers on one platform thread. `BlockingTaskExecutor` runs blocking
-resource operations on virtual threads, with parallelism and queue capacity taken
-from `server.raft.io.poolSize` and `server.raft.io.queueSize`. These are independent
-of the transport's callback pool, which uses the same settings. Overload fails the
-submitted operation rather than running blocking work on the submitting thread.
-Both resources preserve the submitting `CallerContext` MDC and OpenTelemetry
-context and restore the executing thread's previous context afterward. Blocking
-task results normally complete on the state loop; rejected completion dispatch
-and forced shutdown can fail results on the dispatching or shutdown thread.
-Cancelling a queued task skips it before execution and does not interrupt active work.
-After stopping the service, the owner drains blocking work, stops the state loop,
-and then closes telemetry. Each executor reports failure if it cannot terminate
-within five seconds; forced blocking shutdown also fails outstanding operations.
-
-Non-async future callbacks can run on a completing thread or a thread registering
-or helping complete a callback. Blocking work must be dispatched to its owned
-executor rather than run inline on an arbitrary callback thread:
-
-- Bounded waits use `dev.mars.qraft.common.concurrent.Deadlines`, not `CompletableFuture.orTimeout`
-  or `completeOnTimeout`. The JDK completes those on one JVM-wide delay thread,
-  where a blocked callback would stall every timeout in the process. `Deadlines`
-  delivers each timeout on a new virtual thread and releases the pending expiry
-  once the result arrives.
-- The server releases its executors and telemetry from virtual threads it owns
-  after the service stops. This keeps cleanup off the execution resources whose
-  termination it awaits. Later cleanup steps still run after a failure; the first
-  failure is reported with later failures suppressed.
-- The client awaits executor and HTTP client termination on a virtual thread
-  before reporting shutdown complete.
-
-## 18. Observability
-
-Required signals include:
-
-- Raft role, term, commit index, applied index, and leader identity.
-- Replication lag and peer reachability.
-- Catalog registration, deregistration, and health-transition counters.
-- Client reconciliation attempts, failures, current endpoint, and readiness.
-- Snapshot age, WAL size, recovery duration, and recovery failures.
-- Request latency and errors by stable route and error code.
-- Session count, expiry count, and lock contention.
-
-`/raft/status` reports the node ID, server ID, role, term, leader, commit index,
-last applied index, last log index, snapshot index, fenced flag and nullable
-`fenceReason` as one consistent view read on the node's state loop. The reason is
-the first fencing failure's exception type and message; healthy nodes report null.
-The sequencer retains that first failure and logs one ERROR announcement with
-its stack trace when it becomes fenced. Later refusals keep their existing
-messages. Failed startup exposes its retained failure and keeps its existing
-error logs. `/v1/operator/raft/configuration`
-lists the servers in the Raft configuration (section 12.5).
-
-Logs carry request ID, node ID, Raft role and term where applicable, tenant, and
-namespace. Sensitive tokens and health-output secrets are never logged.
-
-A Raft transition logs and traces in the MDC and OpenTelemetry context of the
-caller that submitted it, for every step: preparation, persistence completion, and
-application. Neither the storage thread that completed persistence nor the
-transition that ran before it supplies that context.
-
-Metrics avoid unbounded labels such as raw service IDs, keys, request IDs, or
-error messages.
-
-Built on 2026-11-08 by [`task-list-observability-2026-11-08.md`](../docs/archive/task-list-observability-2026-11-08.md):
-
-- **State metrics**, counted where commands are applied, so every replica counts
-  the same: `qraft.catalog.registrations` and `qraft.catalog.deregistrations` by
-  result, `qraft.health.transitions` by the states left and taken,
-  `qraft.kv.applies` by operation and result, `qraft.session.active`,
-  `qraft.session.invalidations` by reason, and `qraft.lock.acquisitions` by result.
-- **Request metrics**: `qraft.http.requests` by route, method and status, and
-  `qraft.http.request.duration` by route and method; the route is the prefix it
-  was registered under, never the path.
-- **Client metrics** at `GET /v1/client/metrics`, Consul's `/v1/agent/metrics`
-  under Qraft's name, as JSON or as Prometheus text: readiness, the age of the
-  last successful contact with a server, reconciliation passes by result, and,
-  since 2026-11-08 ([`task-list-client-endpoint-metric-2026-11-08.md`](../docs/archive/task-list-client-endpoint-metric-2026-11-08.md)),
-  the server endpoint the client tries first as `qraft.client.server`'s
-  `endpoint` label.
-- **The leader's view of the servers** at `GET /v1/operator/autopilot/health`, in
-  Consul's form: each server's last contact, term, index and health, with the
-  cluster's health and failure tolerance; another server answers 503. A follower
-  is healthy when it answered within an election timeout's worth of heartbeat
-  rounds, as the members read and check-quorum count it, and holds the leader's
-  log to within 250 entries (2026-11-15, Jenkins build 81: the wall clock it was
-  judged by raced a test's wait).
-- **Storage status**: `storageBytes` and `snapshotAgeSeconds` in `/raft/status`,
-  and the gauges `qraft.raft.storage.bytes` and `qraft.raft.snapshot.age`.
-
-A server publishes its metrics on `server.telemetry.prometheusPort`, and
-Prometheus scrapes that port. The OpenTelemetry collector receives a server's
-traces and logs and scrapes nothing: a collector that also scraped the servers
-stored every server's metrics twice, and the dashboard counted six nodes for
-three servers until 2026-10-10.
-
-A server that is stopping can log one warning that is not Qraft's: Netty's
-"Failed to initialize a channel", with an `IllegalReferenceCountException`.
-gRPC's server releases its shared resources and then marks itself terminated.
-A peer's connection that a worker thread prepares between those two steps is
-closed with this warning; one prepared later is closed without it. The cost is
-one refused connection to a server that was stopping anyway, and Qraft cannot
-close the window from outside the library. Two tests of `GrpcRaftServerTest`
-place a connection in the window and after it.
-
-## 19. Test strategy
-
-Development follows red-green-refactor in small behavioral increments.
-
-### 19.1 Domain tests
-
-- Composite service identity prevents cross-node and cross-tenant collisions.
-- Re-registration is deterministic and idempotent.
-- Validation rejects invalid identity, address, port, tags, and metadata.
-- Health transitions and stale observation rejection are deterministic.
-- Session expiry and lock ownership rules cover ordering boundaries.
-
-### 19.2 Codec and compatibility tests
-
-- Every command round-trips through protobuf.
-- Unknown fields are tolerated where safe.
-- Incomplete commands are rejected.
-- Old binary fixtures decode with documented defaults.
-- Snapshot fixtures restore and reserialize deterministically.
-
-### 19.3 Protocol adapter tests
-
-Outbound HTTP adapters use a real JDK HTTP fixture to verify method, path, headers,
-body, timeout, response parsing, failure classification, and resource cleanup.
-Server HTTP tests run against a real bound port and a real single-node Raft
-state machine.
-
-Administrative-resource tests run against the same real HTTP server and verify
-classpath loading from the packaged JAR, content types, cache and security
-headers, path-prefix stripping, client-route fallback, API-route isolation,
-disabled-route behavior, bootstrap escaping, and missing-asset responses.
-
-### 19.4 Lifecycle tests
-
-Purpose-built fakes may represent the catalog-client boundary, scheduler trigger,
-and clock. Tests cover partial startup, repeated calls, retry cancellation,
-readiness transitions, bounded shutdown, and executor termination.
-
-### 19.5 Cluster tests
-
-In-memory and real-transport clusters cover:
-
-- Replication to three servers.
-- Writes sent to followers.
-- Leader isolation and replacement.
-- Conflicting uncommitted entries.
-- Partition healing and follower catch-up.
-- Snapshot installation and restart recovery.
-- Client failover across server seeds.
-
-### 19.6 Container acceptance tests
-
-Tagged tests build one image, start it in both modes, register a service, query it
-through multiple servers, change leadership, and verify graceful and automatic
-deregistration. These tests are separate from the fast default build but run in
-continuous integration with Docker available. The shared fixture builds the image
-once and never retries a failed build: a daemon that loses a snapshot its build
-cache names ("failed to prepare extraction snapshot ... parent snapshot ... does not
-exist", seen once, in Jenkins build 35) is a fault to investigate, not to retry; every
-later class is given the first failure. The build is made before the first Docker
-class's tests, outside their time limits (`docs/TESTING.md`, "Deploying to Docker").
-
-The packaged-artifact acceptance test starts the shaded runtime JAR without a
-frontend directory on disk, fetches `index.html` and a manifest-listed hashed
-asset from the server, and verifies that client mode and disabled server mode do
-not expose the administrative routes.
-
-## 20. Test-first delivery sequence
-
-Current progress, the active tranche's detailed steps, and the backlog are
-tracked in the current dated task list in `docs-design/`; no list is active now.
-The embedded administrative interface list,
-[`task-list-embedded-admin-interface-2026-11-14.md`](../docs/archive/task-list-embedded-admin-interface-2026-11-14.md),
-resumed on 2026-11-13, was completed and archived on 2026-11-14 (tranche 8), and
-with it every initial acceptance criterion of section 21 is met. The interface's
-increments UI-2, scoped discovery, and UI-3, operate, followed the same day, and
-UI-4, events, configuration and live reads, on 2026-11-15, each in a list of its
-own, now archived:
-[`task-list-admin-ui-scoped-discovery-2026-11-14.md`](../docs/archive/task-list-admin-ui-scoped-discovery-2026-11-14.md),
-[`task-list-admin-ui-operate-2026-11-14.md`](../docs/archive/task-list-admin-ui-operate-2026-11-14.md)
-and [`task-list-admin-ui-events-configuration-live-2026-11-15.md`](../docs/archive/task-list-admin-ui-events-configuration-live-2026-11-15.md).
-The Pre-Vote extension,
-[`task-list-raft-pre-vote-2026-10-25.md`](../docs/archive/task-list-raft-pre-vote-2026-10-25.md),
-was completed and archived on 2026-10-25. The membership list that preceded it,
-[`task-list-raft-membership-changes-2026-10-24.md`](../docs/archive/task-list-raft-membership-changes-2026-10-24.md),
-was completed and archived on 2026-10-24 (Steps 1 to 8 verified); its predecessor, [`task-list-test-suite-remediation-2026-10-21.md`](../docs/archive/task-list-test-suite-remediation-2026-10-21.md),
-was archived on 2026-10-02 with its packaged-artifact test carried forward; the
-administrative interface list was paused until 2026-11-13, see [`QRAFT_FEATURE_VALIDATION_2026-10-21.md`](QRAFT_FEATURE_VALIDATION_2026-10-21.md)).
-Completed task lists are moved to `docs/archive/`.
-
-### Tranche 0: Align the WAL and snapshot contracts
-
-Status: complete (2026-09-22). See the archived
-[`RAFTLOG_EXTERNALISATION_TDD_PLAN.md`](../docs/archive/RAFTLOG_EXTERNALISATION_TDD_PLAN.md).
-
-1. Add real-storage contract tests for persist-before-memory ordering, suffix
-   replacement, fencing, and reopen recovery.
-2. Split application snapshots from the WAL interface and add an atomic durable
-   `SnapshotStore` implementation.
-3. Replace the successful prefix-compaction no-op with the real RaftLog operation
-   or an explicit unsupported-operation failure.
-4. Pin the validated RaftLog release and remove stale runtime-adapter assumptions.
-5. Prove snapshot publication, prefix compaction, close, reopen, and recovery in
-   one end-to-end storage test before enabling automatic compaction.
-
-### Tranche 1: Correct catalog identity
-
-Status: complete (verified 2026-09-24).
-
-1. Add failing tests for duplicate local service IDs on different nodes.
-2. Add tenant, namespace, datacenter, region, and enabled-state tests.
-3. Add legacy command and snapshot fixtures.
-4. Implement composite identity and persistence changes.
-
-### Tranche 2: Stable registration protocol
-
-Status: complete (verified 2026-09-24).
-
-1. Add request-mapping and validation tests.
-2. Separate the HTTP DTO from `ServiceInstance`.
-3. Make registration and node-scoped deregistration idempotent.
-4. Add structured error responses and retry classifications.
-
-### Tranche 3: Client catalog adapter
-
-Status: complete (verified 2026-09-24).
-
-1. [x] Add real-HTTP contract tests for registration and deregistration.
-2. [x] Implement `CatalogClient` and `HttpCatalogClient`.
-3. [x] Replace the legacy client HTTP path with the shared classified server
-   transport and seed selector.
-
-### Tranche 4: Reconciliation and readiness
-
-Status: complete (verified 2026-09-24).
-
-1. [x] Add reconciliation tests for partial registration, recovery, changed and
-   deleted definitions, rejection suppression, and overlapping triggers.
-2. [x] Implement single-flight reconciliation and server-seed rotation.
-3. [x] Keep liveness active during cluster outages and derive readiness from policy.
-
-### Tranche 5: Unified runtime flow
-
-Status: complete (verified 2026-09-25).
-
-1. [x] Introduce injectable mode launchers under tests.
-2. [x] Give both production modes one runtime-owned managed lifecycle.
-3. [x] Start one real server and one real client through the runtime boundary.
-4. [x] Verify registration, discovery, readiness loss and recovery,
-   reconciliation after server restart, deregistration, and shutdown end to
-   end.
-5. [x] Exercise explicit and conventional configuration-file selection through
-   the maintained one-image Docker deployment contract.
-
-### Tranche 6: Health propagation
-
-Status: complete (2026-09-26). See the archived
-[`task-list-health-propagation-2026-10-21.md`](../docs/archive/task-list-health-propagation-2026-10-21.md).
-The replicated model, the server health API, local check
-execution, client publication, leader-owned expiry, and end-to-end verification are
-done. The end-to-end tests cover servers and a client started from configuration
-files, HTTP, TCP, and TTL transitions with `passing` discovery, and a killed
-client. Proxies that hold renewals force the renewal/expiry boundary across a
-leader change in both directions. In one, a renewal inside the new leader's grace
-means the check never expires. In the other, a renewal held beyond the grace
-expires the check, and the renewal then restores it. The Docker-tagged suite
-includes a client container that runs health checks.
-
-1. [x] Define health observation and expiry commands with deterministic tests.
-2. [x] Implement local checks and TTL renewal.
-3. [x] Implement leader-owned expiry proposals and automatic deregistration.
-4. [x] Verify behavior across leadership changes and clock boundaries.
-
-### Tranche 7: Multi-node container acceptance
-
-Status: complete (2026-09-27). See the archived
-[`task-list-multi-node-container-acceptance-2026-10-21.md`](../docs/archive/task-list-multi-node-container-acceptance-2026-10-21.md).
-The tests fall into two classes:
-
-- `DockerClientHealthTest` covers items 1 to 3, and a client partitioned from
-  every server and then healed.
-- `DockerClientRecoveryTest` covers item 4 with a running client:
-  - a whole-cluster crash that outlasts the check TTL, recovered from disk
-    without expiring anything;
-  - a killed follower that must install the leader's snapshot to learn health
-    state;
-  - a crashed and restarted client;
-  - a gracefully restarted client.
-
-The work also fixed Raft defects the tests exposed. Followers now compact their
-own logs, a follower accepts appends that overlap its snapshot, and a follower
-reports and commits only what a request verified (sections 14.3 and 14.4).
-
-1. [x] Start three server containers and one client container from one image.
-2. [x] Verify replication and discovery through every server.
-3. [x] Replace the leader and verify client recovery.
-4. [x] Restart servers and verify durable recovery.
-
-### Tranche 8: Embedded administrative interface
-
-Status: complete (2026-11-14). The increments, API prerequisites, and view map
-are in [`QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md`](QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md).
-This tranche delivered increments UI-0 and UI-1; see the archived
-[`task-list-embedded-admin-interface-2026-11-14.md`](../docs/archive/task-list-embedded-admin-interface-2026-11-14.md).
-
-1. [x] Serve the embedded interface from the runtime JAR in server mode
-   (sections 12.4.1 and 19.6).
-2. [x] Build the frontend reproducibly within `mvn package`.
-3. [x] Deliver read-only discovery views on the existing APIs.
-4. [x] Prove packaged-JAR and container delivery, with no interface in client
-   mode or when it is disabled.
-
-## 21. Initial acceptance criteria
-
-The first complete service-discovery slice is accepted when:
-
-- One image starts successfully in both modes.
-- Two nodes can register the same local service ID safely.
-- Client mode remains live and unready when all servers are unavailable.
-- Client mode becomes ready after all required services are committed.
-- Registration succeeds when the first configured server is a follower or offline.
-- Catalog data survives restart and snapshot recovery.
-- Leadership can change without losing committed registrations.
-- Graceful deregistration is bounded and automatic expiry handles crashes.
-- The shaded runtime artifact serves the embedded administrative interface in
-  server mode without external asset files or an additional process.
-- The full default suite and tagged container acceptance suite pass.
-
-Evidence as of 2026-09-27, except where a row gives a later date:
-
-| Criterion | Status | Evidence |
+- **Reloading.** Every context and manager made from `TlsMaterial` delegates to its
+  current material. A server and a client check their files' modification times every
+  30 seconds and reload on a change, after the same checks as at startup. New handshakes
+  use the new material; open connections keep theirs; a reload that fails a check is
+  logged at WARN and leaves the material in use.
+- Consul binds its HTTP API to `127.0.0.1` by default; a Qraft server's HTTP listener
+  binds `server.http.host`, every interface by default, so TLS and ACLs protect it.
+- With ACLs enabled, a server warns at startup of each listener without TLS, HTTP, API
+  gRPC or Raft: a follower forwards a write's token over the Raft port.
+
+### 11.4 Auth methods
+
+Auth methods follow Consul's.
+
+- A replicated `jwt` method holds PEM public keys, a bound issuer and audiences, claim
+  mappings and leeways, and the longest life it gives a token (one hour by default, at
+  most 24). A `kubernetes` method holds the cluster API's `https` host, its CA and a
+  reviewer service-account token, which the API never answers; the server that receives
+  a login asks the cluster's TokenReview API, trusting that CA alone, and an
+  authenticated service account gives `serviceaccount.namespace`, `serviceaccount.name`
+  and `serviceaccount.uid`. A snapshot tells the two types apart by their fields.
+- Binding rules bind a login to a service or node identity, a role or a policy, under a
+  selector of `value.<name> == "<text>"` and `"<text>" in list.<name>` clauses.
+- `POST /v1/acl/login` exchanges a valid credential for a token bound by every matching
+  rule; logout deletes it. Deleting a method deletes its rules and its logins' tokens. A
+  credential the method does not accept is refused 403; a Kubernetes API that cannot be
+  reached or trusted gives 503 `auth_method_unavailable`.
+
+### 11.5 Audit
+
+Every request a server answers under a token is an `AUDIT` event in its journal, with
+the accessor ID, method, route, status, request ID, tenant and namespace; no secret or
+body is recorded. `server.audit.path` also writes the events as JSON lines, rotated by
+size and file count as Consul's audit file sink is. The administrative interface reads
+the answering server's file from its end, filtered, and pages backwards by the byte offset
+each read stopped at, so no page scans again what the last one read.
+
+### 11.6 Not provided
+
+Automatic certificate issuance, revocation lists, a reload command, HTTPS on the client's
+local API, JWKS, OIDC and AWS auth methods, audit of anonymous requests, and audit sinks
+other than a file.
+
+## 12. Events and observability
+
+### 12.1 Events
+
+`dev.mars.qraft.common.events` defines the event contracts, and each server keeps one
+boot's newest events in a bounded `EventJournal`, with per-subscriber queues that end by
+overflow with a resume cursor and are isolated from each other's failures. Events are:
+
+- **system events** from `RaftNode`: leadership gained and lost, a snapshot published,
+  fencing;
+- **domain events** from `QraftStateStore`, for nodes, services, health, keys, locks,
+  sessions and tenancy. Each carries its entry's term and committed index, identical on
+  every replica, and names its scope; a key's event carries the key, never the value, and
+  a write that changed nothing produces none;
+- **audit events** (section 11.5).
+
+`server.http.EventRoutes` serves the query, `GET /v1/operator/events`, and the live watch,
+`GET /v1/operator/events/watch`, filtered by category, type, scope, service, key or
+session; both need `operator:read`. The model, envelope, identity and retention are in
+[`docs/QRAFT_EVENT_ARCHITECTURE.md`](../docs/QRAFT_EVENT_ARCHITECTURE.md).
+
+### 12.2 Status and metrics
+
+`/raft/status` reports, as one view read on the node's state loop, the node ID, server ID,
+role, term, leader, commit index, last applied index, last log index, snapshot index,
+`fenced` and a nullable `fenceReason` (the first fencing failure's exception type and
+message), `removed`, and where the server knows its directory, `storageBytes` and
+`snapshotAgeSeconds`. The sequencer keeps the first fencing failure and logs one ERROR
+with its stack trace when it fences; later refusals keep their own messages.
+
+Metrics follow these rules:
+
+- **State metrics are counted where commands are applied**, so every replica counts
+  alike: registrations and deregistrations by result, health transitions by the states
+  left and taken, key/value applies by operation and result, active sessions, session
+  invalidations by reason, and lock acquisitions by result.
+- **Request metrics** count requests by route, method and status, and their duration by
+  route and method. The route is the prefix it was registered under, never the path.
+- **No unbounded labels**: no service IDs, keys, request IDs or error messages.
+- **The client** publishes readiness, the age of its last server contact, reconciliation
+  passes by result and the endpoint it tries first, at `GET /v1/client/metrics`
+  (Consul's `/v1/agent/metrics` under Qraft's name), as JSON or Prometheus text.
+- **Raft**: vote-request and AppendEntries counters, the Raft I/O pool's gauges, and
+  storage size and snapshot age as gauges (`qraft.raft.storage.bytes`,
+  `qraft.raft.snapshot.age`). Role, term, indexes and leader are read from
+  `/raft/status`.
+- **The leader's view** of the servers, in Consul's autopilot form: each server's last
+  contact, term, index and health, with the cluster's health and failure tolerance. A
+  follower is healthy when it answered within an election timeout's worth of heartbeat
+  rounds, as check-quorum counts it, and trails the leader by at most 250 entries.
+
+A server publishes its metrics on its Prometheus port, and Prometheus scrapes that port.
+The OpenTelemetry collector receives traces and logs and scrapes nothing, so each
+server's metrics are stored once.
+
+**Logs** carry the request ID, node ID, Raft role and term where they apply, tenant and
+namespace. A Raft transition logs and traces in the MDC and OpenTelemetry context of the
+caller that submitted it, for every step (preparation, persistence completion and
+application); neither the storage thread that completed persistence nor the transition
+before it supplies that context. A stopping server can log one warning that is not
+Qraft's, from gRPC's Netty transport; why, and why it is accepted, is in
+[`docs/OPERATIONS.md`](../docs/OPERATIONS.md#a-warning-in-the-log-of-a-server-that-is-stopping).
+
+The metrics and health reads an operator uses are in
+[`docs/OPERATIONS.md`](../docs/OPERATIONS.md#metrics).
+
+## 13. Administrative interface
+
+### 13.1 Capabilities
+
+The server provides a built-in administrative interface backed only by the same
+authenticated, authorized HTTP APIs available to any caller. It never reads or changes
+server objects directly and introduces no other consistency or persistence path. Its
+design is in [`QRAFT_ADMIN_UI_UX_DESIGN.md`](QRAFT_ADMIN_UI_UX_DESIGN.md). It provides:
+
+- **Discover**: services by tenant and namespace with health summaries
+  (`/v1/internal/ui/services`), a service's instances and checks, checks by state
+  (`/v1/health/state/{state}`), and nodes; registering and deregistering services
+  through the normal catalog writes.
+- **Coordinate**: key/value entries by prefix, with indexes, flags and session
+  ownership; set, compare-and-set and delete, recursively too; sessions (with the leader's
+  renewal and expiry times, which a follower answers as unknown), their creation, renewal
+  and destruction; held locks and running lock delays across scopes; and live watches.
+- **Operate**: Raft membership with each server's progress, reachability and health and
+  the quorum's failure tolerance; storage and recovery state, including size, snapshot
+  boundary and age, fencing and the last failed snapshot; and server removal.
+- **Govern**: tenants and namespaces (their descriptions, what each holds, creation and
+  deletion); ACL tokens and policies, with explanation of a decision; the security status
+  (ACLs, default policy, profile, listener TLS, management tokens, the anonymous token's
+  writes, tokens that hold `acl:write` without expiry, and tokens expiring soon); and the
+  audit file.
+- **Observe**: the server's events, the effective configuration (each setting with its
+  value, whether configured or defaulted, and secrets redacted).
+- **Read metadata**: an explicit consistency selection and the index, consistency,
+  leader contact and answering server of each read.
+
+The interface acts with the caller's token. With ACLs disabled it has the access every
+caller has. Every mutation goes through the replicated command path and is audited like
+any other request, and the interface shows leader hints, retryability, authorization
+failures and unknown outcomes exactly as the API answers them. Secrets, raw credentials
+and protected key/value contents are never shown without permission.
+
+### 13.2 Packaging and serving
+
+- **One artifact.** The frontend is built before Java packaging into `index.html`,
+  content-hashed scripts and styles, and `asset-manifest.json` (Vite's
+  `build.manifest: 'asset-manifest.json'`). Maven stages it under `META-INF/qraft/ui/`
+  and the shade step packs it into `target/qraft.jar`. The frontend source is part of the
+  one source tree, with locked tool and dependency versions, so a clean build is
+  reproducible. The container image holds the same jar and no separate web
+  distribution.
+- **Served from the classpath.** Assets are read through `ClassLoader` resource streams,
+  never as a `Path` or through `Files`, because resources in the shaded jar are ZIP
+  entries. They are served on the server's HTTP listener and share its TLS, request
+  limits and lifecycle. Client mode serves no interface; disabling it removes its routes
+  without producing a different executable.
+- **Routing.** The handler strips only the configured path prefix (`/ui/` by default; it
+  cannot begin with `v1`, `api`, `health`, `raft`, `status`, `metrics` or `debug`). A
+  read of `/` redirects 302 to the interface when it is enabled. An unknown extensionless
+  `GET` below the prefix falls back to `index.html` for client-side routing; a missing
+  named asset is 404, and API, metrics, health and debugging paths never fall back.
+  Whether a last segment has an extension is read from the path as sent, before
+  decoding, and the interface writes a dot in a route's name as `%2E`, so a view of a
+  service named `api.v2` is still a route.
+- **The index** is rendered per request and never stored: a JSON bootstrap object with
+  public settings (the API base path, the interface's path, feature flags, the
+  authentication mode and the security profile), never a secret, and a `<base>` naming
+  the interface's path, since assets are linked relative to the page. Content-hashed
+  assets are cached as immutable.
+- **Headers.** An explicit content type, `X-Content-Type-Options: nosniff`, and a
+  restrictive content security policy. Inline styles are allowed only with the request's
+  nonce, which Ant Design passes to the styles it adds; the interface gives the nonce to a
+  style a library adds without it. Only scripts from the server's own origin run.
+- **Compression.** Scripts, styles, JSON and SVG are sent gzip to a request that accepts
+  it, compressed once and kept in memory, with `Vary: Accept-Encoding`; the rendered index
+  is not compressed. The build splits the application from its libraries so no script
+  passes Vite's 500 kB warning.
+- **Development override.** `server.ui.devAssetsDirectory` replaces the embedded assets
+  for frontend work. Startup refuses a missing directory, one without `index.html`, or an
+  override with the interface disabled.
+
+## 14. Lifecycle and resource ownership
+
+### 14.1 Ownership
+
+The runtime owns mode selection; the selected mode owns its application service; each
+service owns its servers, clients, schedulers, storage and background tasks. No component
+creates an executor that another is expected to find and close. Startup failure closes
+what was already opened, in reverse order. Every close is idempotent, and every caller
+of a shutdown shares one completion.
+
+### 14.2 Server execution resources
+
+`QraftServerApplication` owns two execution resources from `common.async`:
+
+- `RaftStateLoop` serializes Raft state transitions and timers on one platform thread.
+- `BlockingTaskExecutor` runs blocking resource operations on virtual threads, with
+  parallelism and queue capacity from `server.raft.io.poolSize` and `queueSize`. These are
+  independent of the transport's callback pool, which uses the same settings. Overload
+  fails the submitted operation rather than running blocking work on the submitting
+  thread. Cancelling a queued task skips it; active work is not interrupted.
+
+Both preserve the submitting `CallerContext`, MDC and OpenTelemetry context, and restore
+the executing thread's previous context afterwards. Blocking results normally complete on
+the state loop; a refused completion dispatch or a forced shutdown can fail results on
+the dispatching or shutdown thread.
+
+### 14.3 Server shutdown
+
+`server.lifecycle.ShutdownCoordinator` runs a server's shutdown once; a repeated call
+returns the same completion. Its states are `RUNNING`, `DRAINING`, `SHUTTING_DOWN`,
+`STOPPED` and `FAILED`, and it runs four phases in order, each hook bounded by its own
+deadline:
+
+| Phase | Deadline | What runs |
 |---|---|---|
-| One image in both modes | Met | `DockerClientHealthTest`, `DockerClientRecoveryTest` |
-| Same local service ID on two nodes | Met | `ClientEndToEndTest.twoClientsCanRegisterTheSameLocalServiceId` |
-| Live and unready without servers | Met | `DockerClientRecoveryTest` (whole-cluster crash), `DockerClientHealthTest` (partition) |
-| Ready after required services commit | Met | `QraftClientTest.retriesRegistrationAndBecomesReadyWhenServerRecovers`, `DockerClientRecoveryTest` |
-| Registration via a follower or offline seed | Met | `ClientEndToEndTest.threeNodeClusterAcceptsClientWhenFirstSeedIsAFollower`, `ClientHealthPublicationTest` |
-| Catalog survives restart and snapshot recovery | Met | `DockerDurableRestartTest`, `DockerClientRecoveryTest` |
-| Leadership change keeps committed registrations | Met | `DockerDurableRestartTest.killedLeaderIsReplacedAndRejoinsWithCompleteCatalog`, `DockerClientHealthTest` |
-| Bounded graceful deregistration; expiry handles crashes | Met | `QraftClientTest.unreachableServerCannotExtendShutdownPastDeadlineAndLogsOnce`, `DockerClientHealthTest`, `CrashedClientExpiryEndToEndTest` |
-| Embedded administrative interface | Met (2026-11-14) | `PackagedAdminUiEndToEndTest` (the shaded JAR started from a directory with no interface files; client mode and a disabled server serve none of its routes), `DockerAdminUiTest` (server containers of the runtime image), `AdminUiDataContractTest`, `HttpApiServerAdminUiTest`, `EmbeddedUiResourcesTest`; Jenkins build 70 |
-| Full default suite and container suite pass | Met (2026-11-14) | Jenkins build 70: 1,997 default tests with every coverage gate, 31 end-to-end, and 52 Docker and `slow` tests, with 49 frontend tests in each Maven run and a clean log audit. First met on 2026-10-02 with 812 default, 23 Docker-tagged and 7 end-to-end tests |
+| `DRAIN` (state `DRAINING`) | `server.shutdown.drainTimeoutMs` | Hooks that stop accepting new work. |
+| `AWAIT_COMPLETION` | `server.shutdown.timeoutMs` | Hooks that wait for active work; the server registers none, since no server-managed work remains after draining. |
+| `STOP_SERVICES` (state `SHUTTING_DOWN`) | `server.shutdown.timeoutMs` | Leader-only work (token installation, token and session expiry, health expiry), the audit sink and TLS reloader; then the Raft and API gRPC servers, DNS and the HTTP listener; then the Raft node, which closes storage. |
+| `CLOSE_RESOURCES` | `server.shutdown.timeoutMs` | Hooks that close remaining resources; the server registers none, since stopping the Raft node closes storage. |
 
-## 22. Open decisions
+A hook that fails or times out is logged and the sequence goes on, except a critical one:
+stopping the Raft node is critical, and if it fails, later hooks are skipped, the state
+becomes `FAILED` and the completion fails, because closing resources under a node that
+did not stop would break its storage contract. Otherwise the state becomes `STOPPED`.
 
-- Whether warning services are returned by default discovery queries.
-- Whether write forwarding is implemented server-side or seed rotation remains the
-  primary client behavior.
-- Whether the server can trust a caller's claim to a node. Proposed 2026-10-05:
-  ACL tokens on Consul's model, in
-  [`task-list-acl-and-tokens-2026-11-07.md`](../docs/archive/task-list-acl-and-tokens-2026-11-07.md),
-  started 2026-11-04. Since its Phase 4 (2026-11-06), a server with ACLs enabled
-  needs `node:write` on a name to register, renew, take over or rename it
-  (section 15.1); Phase 7 (2026-11-07) states those guards for a client's node
-  identity, and Phase 6 has the client send it, so with ACLs enabled the server
-  trusts a claim only as far as the token's grants. With ACLs disabled, any caller
-  can still claim any node name and node ID. Since 2026-11-07 transport security
-  (section 15.2) binds a caller to a machine with a client certificate, which a
-  server's HTTPS listener requires by default.
-- How long legacy command and snapshot readers remain supported.
+After the service stops, `QraftServerApplication` drains blocking work, stops the state
+loop and closes telemetry, on a virtual thread it owns, so cleanup never runs on an
+execution resource whose termination it awaits. Each executor reports failure if it
+cannot terminate within five seconds; a forced blocking shutdown fails outstanding
+operations. Later steps still run after a failure; the first failure is reported with the
+later ones suppressed.
 
-Resolved on 2026-10-10: a server recovers by itself from a kill during its
-first snapshot, and recovery refuses a WAL that is compacted further than the
-published snapshot reaches. Section 14.5 states both.
-[`TEST-RESULTS.md`](../docs/TEST-RESULTS.md) has the tests, what other Raft
-implementations do, and the opinion recorded before the decision.
+A draining HTTP server reports `draining` on readiness, refuses proposals with 503
+`draining`, retryable, and forwards nothing (`HttpApiServer.enterDrainMode`). The server's
+`DRAIN` hook puts the HTTP API into drain mode before `STOP_SERVICES` stops the listener.
+The drain does not wait: a load balancer is told to stop sending by the operator, before the
+stop.
 
-Resolved on 2026-10-04, recorded here on 2026-10-05: how a node's identity is
-made and kept, which was half of the open item "how client identity is
-established". It is decision 8 of
-[`task-list-consul-style-client-2026-11-01.md`](../docs/archive/task-list-consul-style-client-2026-11-01.md)
-and was built on 2026-10-30; section 7.3 states it. It follows Consul: a node ID
-generated at first start and kept in the client's data directory, a node name
-that defaults to the host name, a catalog keyed by name, and a registration
-under a name held by another node ID refused unless that holder is dead. On
-2026-10-29 it was checked against Consul's catalog code, and the owner decided
-four points: a rename follows Consul; a registration with an ID claims a node
-without one; names conflict regardless of case; a `registering` node holds its
-name. It departs from Consul in three ways. Qraft has no gossip, so a holder is
-dead when its node TTL has lapsed. A takeover removes the old node's services
-and checks in the same replicated step, where Consul leaves them to the new
-client's anti-entropy. Qraft's reconciler has had anti-entropy since 2026-10-30
-(D3 below), but only in its own tenant and namespace and from its first pass. A node
-that has not yet sent its first heartbeat keeps its name. Upgrade fixtures
-written before the node ID (`fixtures/node-identity/`) show older entries and
-snapshots loading without one. The other half, trusting the claim, is the open
-item above.
+### 14.4 Client shutdown
 
-Resolved on 2026-09-22: the public registration schema uses the Qraft field names
-shown in section 12.1 and currently accepts no aliases. Unknown fields are
-rejected. The legacy `health` input name is the sole temporary compatibility
-exception; it is accepted but ignored because health is server-owned.
+The client's shutdown is the sequence of section 6.4, bounded as a whole by
+`client.shutdownTimeoutMs`. The client awaits its executors' and HTTP client's
+termination on a virtual thread before reporting shutdown complete, and `HttpCatalogClient`
+owns and idempotently closes its JDK `HttpClient`.
 
-Resolved D1 on 2026-09-24: Qraft runtime configuration is a versioned JSON file.
-The file is selected by explicit argument, JVM locator property, or conventional
-role-specific path, in that order. Qraft does not use environment variables for
-configuration or file discovery. Client service definitions are stored in the
-main document's `catalog.services` array rather than a separately selected file.
+### 14.5 Callbacks and deadlines
 
-Discovery reads never cross tenant or namespace. `GET /v1/catalog/services`,
-`GET /v1/catalog/service/{serviceName}`, and `GET /v1/health/service/{serviceName}`
-use the same optional `X-Qraft-Tenant` and `X-Qraft-Namespace` headers as
-registration, default to `default`, and return only that scope, grouped by the
-discovery key of section 7.5. A blank scope header is rejected with 400
-`invalid_scope`. Reads across scopes are an administrative concern for a later
-authenticated API.
+A non-async future callback can run on the completing thread or on a thread registering
+or helping complete it, so blocking work is dispatched to its owned executor, never run
+inline on an arbitrary callback thread. Bounded waits use
+`dev.mars.qraft.common.concurrent.Deadlines`, not `CompletableFuture.orTimeout` or
+`completeOnTimeout`: the JDK completes those on one JVM-wide delay thread, where one
+blocked callback would stall every timeout in the process. `Deadlines` delivers each
+timeout on a new virtual thread and releases the pending expiry once the result arrives.
 
-Resolved D2 on 2026-09-24: reconciliation detects administrative deletion through
-`GET /v1/catalog/service/{name}` and filters the response by the complete tenant,
-namespace, node, and service identity. No additional node-scoped read endpoint is
-required. It still detects a deletion this way. The node-scoped read added on
-2026-10-30, `GET /v1/catalog/node-services/{nodeName}`, serves anti-entropy: only a
-list can show a service the client does not know.
+## 15. Test strategy
 
-Resolved D3 on 2026-09-24: when the reconciler's definition source removes or
-disables a definition registered by the current process, it is deregistered on
-the next pass. The production JSON source is currently loaded once, so live file
-removal is not observed until a future reload mechanism is implemented. Instances
-left by an earlier process waited for automatic expiry from Tranche 6 until
-2026-10-30; the reconciler now removes them on its next pass (section 8.2).
+Development is strict test-first: a failing test, then the code, in small behavioural
+increments. [`docs/TESTING.md`](../docs/TESTING.md) describes the three suites, how to run
+them, and the log audit that every run passes: any logged error without an explicit
+intentional-error flag is a defect, whatever the test totals say.
 
-Decisions that affect durable identity or wire compatibility require an explicit
-architecture decision record and fixture-based upgrade tests before implementation.
+- **Domain tests**: composite identity prevents cross-node and cross-tenant collisions;
+  re-registration is deterministic and idempotent; validation refuses invalid identity,
+  address, port, tags and metadata; health transitions, stale observations, session
+  expiry and lock ownership are deterministic at their ordering boundaries.
+- **Codec and compatibility tests**: every command round-trips through protobuf; unknown
+  fields are tolerated where safe; incomplete and unknown commands are refused; old binary
+  and snapshot fixtures decode with documented defaults and reserialize deterministically.
+- **Protocol adapter tests**: outbound HTTP adapters run against a real JDK HTTP fixture
+  for method, path, headers, body, timeout, parsing, failure classification and cleanup.
+  Server HTTP tests run against a real bound port and a real single-node Raft state
+  machine. Interface-serving tests verify classpath loading from the packaged jar,
+  content types, cache and security headers, prefix stripping, client-route fallback,
+  API-route isolation, disabled routes, bootstrap escaping and missing assets.
+- **Lifecycle tests**: purpose-built fakes for the catalog-client boundary, scheduler
+  trigger and clock; partial startup, repeated calls, retry cancellation, readiness
+  transitions, bounded shutdown and executor termination.
+- **Raft tests**: held transports and manual timers decide rounds deterministically,
+  never wall-clock waits. Membership, Pre-Vote, cleanup and disruptive-server rules each
+  have such tests, and real-WAL tests reopen storage.
+- **Cluster tests**: in-memory and real-transport clusters cover replication to three
+  servers, writes sent to followers, leader isolation and replacement, conflicting
+  uncommitted entries, partition healing and catch-up, snapshot installation, restart
+  recovery and client failover across servers.
+- **End-to-end tests**: real servers and clients started through the runtime boundary
+  from configuration files, covering registration, discovery, readiness loss and
+  recovery, reconciliation after server restart, health transitions across leader
+  changes, deregistration and ordered shutdown. The packaged-artifact test starts the
+  shaded jar from a directory with no interface files, fetches the index and a
+  manifest-listed asset, and verifies that client mode and a disabled server serve none
+  of the interface's routes.
+- **Container tests**: one image started in both modes; multi-server clusters with
+  clients; leader replacement, durable restart, membership changes, partitions and lost
+  quorum. The shared fixture builds the image once, before the first container test class
+  and outside its time limits, and never retries a failed build: a failed build is a
+  fault to investigate, and every later class is given the first failure.
+
+An intermittent failure is a defect: its cause is found, production code is checked for
+the race, and the test is made deterministic.
+
+## 16. Differences from Consul
+
+Qraft follows Consul's routes, field names and rules unless a difference below is
+stated. Each is deliberate.
+
+| Area | Consul | Qraft | Why |
+|---|---|---|---|
+| Membership and failure detection | Serf gossip; `serfHealth` check | Heartbeats and node TTL decided by the leader; an unreachable node's services leave `?passing` | No gossip layer; one replicated status makes every server answer alike (section 7.4). |
+| Client members | `/v1/agent/members` lists the gossip pool, `left` nodes included | A forwarded catalog node read; clients only; no `left`; no `wan` or `segment` | No gossip pool (section 6.3). |
+| Admin partitions | Enterprise admin partitions | Tenants, with namespaces inside | The same isolation boundary under Qraft's name (section 5.1). |
+| Default reads | Forwarded to the leader | The answering server's applied state, with known-leader headers | Qraft forwards writes, not reads (section 9.2). |
+| Unknown query parameters | Ignored | Refused 400 `invalid_query` | An ignored parameter answers another question (section 4.5). |
+| A `registering` node's name | Replaceable without a Serf check | Held until the node is unreachable | A registering node is alive (section 5.2). |
+| Name takeover | The new Consul agent's anti-entropy removes the old services | Removed in the same replicated step | The reconciler removes only its own scope, from its first pass (section 5.2). |
+| ACL secrets | Stored | Only SHA-256 hashes replicated | WAL, snapshots and backups hold no secret (section 11.2). |
+| Management token file | Bootstrap window open at first leadership | Bootstrap refused until the file's token is installed | No other bootstrap can win the race (section 11.2). |
+| `verifyIncoming` | `false` by default | `true` by default | A stolen token is useless without a certificate (section 11.3). |
+| Server HTTP bind | `127.0.0.1` by default | Every interface | Clients on other hosts call the servers; TLS and ACLs protect the listener (section 11.3). |
+| Local API writes during leave | Accepted | Refused 503 `shutting_down` | Nothing is registered behind the deregistration (section 6.3). |
+| Unreadable persisted registrations | Logged; Consul continues | The client stops; the file is kept | A silently lost registration would deregister services (section 6.3). |
+| TTL status across restart | Kept until it would expire | Not kept | (section 6.3) |
+| Maintenance check | Critical | Reports `maintenance`; not required | Maintenance never holds readiness back (section 6.3). |
+| Leave | Permanent until an explicit join or `rejoin_after_leave` | The next start registers again | A client always has its server URLs (section 6.4). |
+| Catalog writes through the local API | Forwarded | Registrations go through `/v1/client/*` | The client keeps and reconciles what applications register (section 6.3). |
+| Pre-vote grant | `hashicorp/raft`'s rule | Granted only for a term strictly ahead of the receiver's | (section 8.4) |
+| Configuration | Files, flags and some environment variables | One JSON file; no environment variables | Principle 9. |
+| DNS | Recursors, prepared queries, other datacenters | None | Not offered (section 5.3). |
+| KV ACLs | `list` access | No `list` access | (section 5.5) |
+| Client metrics | `/v1/agent/metrics` | `/v1/client/metrics` | The routes are named after Qraft's client mode. |
+
+## 17. Open decisions and known gaps
+
+- **Trusting a node claim with ACLs disabled.** With ACLs enabled, a server trusts a
+  caller's node claim only as far as its token's grants (section 11.2), and with HTTPS a
+  client certificate binds the caller to a machine (section 11.3). With ACLs disabled,
+  any caller can still claim any node name and node ID. Whether the development profile
+  should keep that is open.
+- **The migration window for legacy readers.** How long the readers of legacy command and
+  snapshot formats (section 10.8), including the JSON distributed-state entries, stay
+  supported.
+- **Runtime configuration reload.** Configuration is read once; changing or removing a
+  service in a client's file needs a restart, though the local API changes definitions at
+  run time. Whether to add a reload is open.
+- **Reconciliation backoff.** Service reconciliation stays on the heartbeat cadence and
+  has no independent backoff; only node registration backs off.
