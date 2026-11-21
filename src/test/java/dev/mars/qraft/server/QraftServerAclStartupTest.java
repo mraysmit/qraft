@@ -26,6 +26,7 @@ import dev.mars.qraft.server.api.AclGrpcGuard;
 import dev.mars.qraft.server.api.grpc.DistributedStateServiceGrpc;
 import dev.mars.qraft.server.api.grpc.GetRequest;
 import dev.mars.qraft.server.config.AppConfig;
+import dev.mars.qraft.testing.LogCapturesHelper;
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
 import io.grpc.Metadata;
@@ -106,7 +107,8 @@ class QraftServerAclStartupTest {
             executors.close().get(30, TimeUnit.SECONDS);
             root.detachAppender(captured);
         }
-        assertFalse(captured.list.stream().anyMatch(event -> event.getFormattedMessage().contains(SECRET)),
+        assertFalse(LogCapturesHelper.snapshot(captured).stream()
+                .anyMatch(event -> event.getFormattedMessage().contains(SECRET)),
                 "no log line holds the management secret");
     }
 
@@ -156,7 +158,7 @@ class QraftServerAclStartupTest {
      */
     private HttpResponse<String> refusedOnceInstalled() throws Exception {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(20);
-        while (captured.list.stream().noneMatch(event -> event.getFormattedMessage()
+        while (LogCapturesHelper.snapshot(captured).stream().noneMatch(event -> event.getFormattedMessage()
                 .startsWith("Installed the management token from server.acl.initialManagementTokenFile"))) {
             assertTrue(System.nanoTime() < deadline, "the server installs the file's token within 20 s");
             Thread.sleep(50);
