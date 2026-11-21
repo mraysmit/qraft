@@ -181,6 +181,10 @@ class HttpApiServerEventWatchTest {
         assertEquals(400, http.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + server.port()
                 + "/v1/operator/events/watch?after=" + journal.bootId() + ":99")).build(),
                 HttpResponse.BodyHandlers.discarding()).statusCode(), "a cursor past the journal's last event");
+        // Code defects list, item 12: a watch has no page to limit; it took a limit and ignored it.
+        assertEquals(400, http.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + server.port()
+                + "/v1/operator/events/watch?limit=5")).build(), HttpResponse.BodyHandlers.discarding()).statusCode(),
+                "a watch refuses a limit");
     }
 
     @Test
