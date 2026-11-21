@@ -31,7 +31,7 @@ import java.util.Optional;
 
 /**
  * Serves the administrative interface's files below its configured path on the server's HTTP listener (design
- * section 12.4.1).
+ * section 13.2).
  *
  * <p>Only the configured prefix is stripped before the lookup. A relative path with an empty, {@code .}, or
  * {@code ..} segment, a backslash, or a control character is refused, so a request can never leave the asset root.
