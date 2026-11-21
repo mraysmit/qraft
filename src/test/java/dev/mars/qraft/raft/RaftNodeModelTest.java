@@ -237,7 +237,7 @@ class RaftNodeModelTest {
     }
 
     /**
-     * The follower rule of design section 14.3. A success verifies only the prefix the leader named
+     * The follower rule of design section 10.3. A success verifies only the prefix the leader named
      * plus the entries it sent, so the match index and any commit stop there. A tail beyond it may
      * belong to an unrelated history.
      */
