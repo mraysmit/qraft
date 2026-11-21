@@ -25,6 +25,7 @@ import dev.mars.qraft.client.health.CheckStatus;
 import dev.mars.qraft.client.health.ObservationOutcome;
 import dev.mars.qraft.common.Node;
 import dev.mars.qraft.common.ServiceDefinition;
+import dev.mars.qraft.testing.LogCapturesHelper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -182,9 +183,11 @@ class HttpCatalogClientTest {
                 case "malformed-server" -> respond(exchange, 500, "not-json");
                 case "malformed-client" -> respond(exchange, 400, "not-json");
                 case "rate-limited" -> respond(exchange, 429, "not-json");
+                // Code defects list, decision 1: the server marks an unknown outcome not retryable; the
+                // client's own writes are idempotent, so it replays them by the code.
                 case "outcome-unknown" -> respond(exchange, 503,
                         "{\"code\":\"outcome_unknown\",\"message\":\"response lost\","
-                                + "\"retryable\":true}");
+                                + "\"retryable\":false}");
                 case "bad-gateway" -> respond(exchange, 502, "not-json");
                 case "unavailable" -> respond(exchange, 503, "not-json");
                 case "bad-success" -> respond(exchange, 200, "{\"serviceId\":\"bad-success\"}");
@@ -745,7 +748,8 @@ class HttpCatalogClientTest {
         } finally {
             logger.detachAppender(appender);
         }
-        return appender.list.stream().filter(event -> event.getLevel() == ch.qos.logback.classic.Level.INFO)
+        return LogCapturesHelper.snapshot(appender).stream()
+                .filter(event -> event.getLevel() == ch.qos.logback.classic.Level.INFO)
                 .map(ch.qos.logback.classic.spi.ILoggingEvent::getFormattedMessage).toList();
     }
 
