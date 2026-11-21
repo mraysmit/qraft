@@ -71,7 +71,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * node already registered (proposal 11, as Consul); a client's node identity removes an instance planted on its node,
  * and a token with neither {@code node:write} nor {@code service:write} on it cannot; and a takeover and a rename
  * succeed with the right tokens, under the client list's decision 8. This closes the "can the server trust the claim"
- * half of design section 22.
+ * half of design section 17.
  *
  * <p>The guards were built in Phase 4; these tests state them in the terms of node identity, and passed when first
  * run.
