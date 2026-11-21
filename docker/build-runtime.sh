@@ -7,8 +7,9 @@ REPOSITORY_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
 ARTIFACT="$REPOSITORY_ROOT/target/qraft.jar"
 
 # A JAR newer than the POM and every production source is current. Packaging again would rewrite target/
-# under a Maven build that is running in this tree.
-if [ -f "$ARTIFACT" ] && [ -z "$(find "$REPOSITORY_ROOT/pom.xml" "$REPOSITORY_ROOT/src/main" -type f -newer "$ARTIFACT" | head -n 1)" ]; then
+# under a Maven build that is running in this tree. The interface's node_modules is not a source: every mvn test
+# installs it again from its lockfile, which is the source, as SharedDockerClusterFixture also counts it.
+if [ -f "$ARTIFACT" ] && [ -z "$(find "$REPOSITORY_ROOT/pom.xml" "$REPOSITORY_ROOT/src/main" -path '*/node_modules' -prune -o -type f -newer "$ARTIFACT" -print | head -n 1)" ]; then
   echo "Host-built artifact is current: $ARTIFACT"
   exit 0
 fi
