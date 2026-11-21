@@ -44,6 +44,7 @@ import dev.mars.qraft.common.NodeStatus;
 import dev.mars.qraft.testing.fault.InjectedFaultFixture;
 import dev.mars.qraft.testing.fault.IntentionalErrorsHelper;
 import dev.mars.raftlog.storage.RaftStorage;
+import dev.mars.qraft.testing.LogCapturesHelper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -172,7 +173,7 @@ class HttpApiServerTest {
             HttpResponse<String> response = request(HttpClient.newHttpClient(), "/health/live", "GET", null,
                     Map.of("X-Request-Id", "mdc-request-7"));
             assertEquals(200, response.statusCode());
-            assertTrue(appender.list.stream().anyMatch(event ->
+            assertTrue(LogCapturesHelper.snapshot(appender).stream().anyMatch(event ->
                     "mdc-request-7".equals(event.getMDCPropertyMap().get("requestId"))));
         } finally {
             logger.detachAppender(appender);
@@ -437,6 +438,9 @@ class HttpApiServerTest {
         JsonNode status = new ObjectMapper().readTree(response.body());
         assertTrue(status.has("fenceReason"), "status includes the nullable diagnostic field");
         assertTrue(status.get("fenceReason").isNull(), "a healthy node has no fence reason");
+        HttpResponse<String> unknown = request(HttpClient.newHttpClient(), "/raft/status?verbose", "GET");
+        assertEquals(400, unknown.statusCode(), "an unknown parameter is refused (code defects list, item 13)");
+        assertEquals("invalid_query", new ObjectMapper().readTree(unknown.body()).path("code").asText());
     }
 
     @Test
@@ -832,7 +836,8 @@ class HttpApiServerTest {
         try {
             HttpResponse<String> response = request.get(10, TimeUnit.SECONDS);
             assertEquals(503, response.statusCode());
-            JsonNode body = assertErrorEnvelope(response, "outcome_unknown", true);
+            // Code defects list, decision 1: an outcome that may have been applied is not a retryable refusal.
+            JsonNode body = assertErrorEnvelope(response, "outcome_unknown", false);
             assertEquals("pending-http-node", body.path("leaderId").textValue(),
                     "the envelope names the leader to retry against");
             assertEquals("pending-http-node", response.headers().firstValue("X-Qraft-Leader-Id").orElse(null));
