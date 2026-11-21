@@ -16,6 +16,7 @@
 
 package dev.mars.qraft.server.config;
 
+import dev.mars.qraft.testing.LogCapturesHelper;
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
@@ -111,18 +112,26 @@ class AppConfigTlsTest {
                 () -> config("\"tls\":{" + MATERIAL + ",\"raft\":{\"verifyIncoming\":false}}"));
     }
 
+    /**
+     * Code defects list, item 5: a follower forwards a write with its token over the Raft port, so a Raft listener
+     * without TLS carries tokens in the clear too; the warning left it out.
+     */
     @Test
     void theUnencryptedWarningNamesOnlyTheListenersWithoutTls() {
         assertEquals(List.of("ACLs are enabled, but no listener uses TLS: tokens cross the network unencrypted. "
-                + "Set server.tls.https and server.tls.grpc"), warnings(config(ACL)));
-        assertEquals(List.of("ACLs are enabled, but the API gRPC listener does not use TLS: tokens sent to it cross "
-                        + "the network unencrypted. Set server.tls.grpc"),
+                + "Set server.tls.https, server.tls.grpc and server.tls.raft"), warnings(config(ACL)));
+        assertEquals(List.of("ACLs are enabled, but the API gRPC and Raft listeners do not use TLS: tokens sent to "
+                        + "them cross the network unencrypted. Set server.tls.grpc and server.tls.raft"),
                 warnings(config(ACL + ",\"tls\":{" + MATERIAL + ",\"https\":{\"enabled\":true}}")));
-        assertEquals(List.of("ACLs are enabled, but the HTTP listener does not use TLS: tokens sent to it cross the "
-                        + "network unencrypted. Set server.tls.https"),
+        assertEquals(List.of("ACLs are enabled, but the HTTP and Raft listeners do not use TLS: tokens sent to them "
+                        + "cross the network unencrypted. Set server.tls.https and server.tls.raft"),
                 warnings(config(ACL + ",\"tls\":{" + MATERIAL + ",\"grpc\":{\"enabled\":true}}")));
+        assertEquals(List.of("ACLs are enabled, but the Raft listener does not use TLS: tokens sent to it cross the "
+                        + "network unencrypted. Set server.tls.raft"),
+                warnings(config(ACL + ",\"tls\":{" + MATERIAL
+                        + ",\"https\":{\"enabled\":true},\"grpc\":{\"enabled\":true}}")));
         assertEquals(List.of(), warnings(config(ACL + ",\"tls\":{" + MATERIAL
-                + ",\"https\":{\"enabled\":true},\"grpc\":{\"enabled\":true}}")));
+                + ",\"https\":{\"enabled\":true},\"grpc\":{\"enabled\":true},\"raft\":{\"enabled\":true}}")));
     }
 
     private static List<String> warnings(AppConfig config) {
@@ -136,7 +145,7 @@ class AppConfigTlsTest {
         } finally {
             logger.detachAppender(appender);
         }
-        return appender.list.stream().filter(event -> event.getLevel() == Level.WARN)
+        return LogCapturesHelper.snapshot(appender).stream().filter(event -> event.getLevel() == Level.WARN)
                 .map(ILoggingEvent::getFormattedMessage).toList();
     }
 
