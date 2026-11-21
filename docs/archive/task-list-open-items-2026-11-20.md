@@ -6,7 +6,7 @@ open items". Every item is closed: four with work done test first (Phases 1 to 4
 each reversible. The three suites passed locally with clean audits (section 11); the work is uncommitted.
 **Last updated:** 2026-11-20 (written; Phases 1 to 6 done; decisions 2, 5 and 6 amended; archived)
 **Active work:** complete on 2026-11-20
-**Source:** [`HANDOVER_2026-11-20.md`](../../docs-design/HANDOVER_2026-11-20.md), section 6
+**Source:** `docs-design/HANDOVER_2026-11-20.md`, section 6, as committed in `cc3b171`; the handover was replaced on 2026-11-21
 **Standards:** [`PROJECT_STANDARDS.md`](../PROJECT_STANDARDS.md)
 
 ## 1. Goal
