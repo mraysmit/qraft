@@ -19,7 +19,7 @@ import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vitest/config';
 
 // The build writes below target/, which Maven stages as generated resources, so the files land below
-// META-INF/qraft/ui/ in target/qraft.jar (design section 12.4.1). Nothing it writes is committed.
+// META-INF/qraft/ui/ in target/qraft.jar (design section 13.2). Nothing it writes is committed.
 const outDir = fileURLToPath(new URL('../../../target/generated-resources/ui/META-INF/qraft/ui', import.meta.url));
 
 // A local server for `npm run dev`: the interface calls the API on the listener that serves it.
