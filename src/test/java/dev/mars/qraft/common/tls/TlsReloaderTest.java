@@ -16,6 +16,7 @@
 
 package dev.mars.qraft.common.tls;
 
+import dev.mars.qraft.testing.LogCapturesHelper;
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
@@ -76,8 +77,8 @@ class TlsReloaderTest {
     }
 
     private List<String> logged(Level level) {
-        return log.list.stream().filter(event -> event.getLevel() == level).map(ILoggingEvent::getFormattedMessage)
-                .toList();
+        return LogCapturesHelper.snapshot(log).stream().filter(event -> event.getLevel() == level)
+                .map(ILoggingEvent::getFormattedMessage).toList();
     }
 
     @Test
