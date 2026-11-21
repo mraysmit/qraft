@@ -1,11 +1,13 @@
 # Qraft Administrative UI Implementation Plan
 
+**Archived:** 2026-11-21, by the documentation cleanup ([`task-list-documentation-cleanup-2026-11-21.md`](task-list-documentation-cleanup-2026-11-21.md)). Kept as a record; not updated since.
+
 **Status:** Agreed 2026-09-27; UI-0 to UI-3 delivered 2026-11-14, UI-4 and UI-5 on 2026-11-15; open question 5 decided with UI-5, questions 4 and 6 when their increments start
 **Last updated:** 2026-11-18 (UI-6's third list, Tenants, Namespaces and Audit, delivered and archived, and with it UI-6; sections 4 and 5 brought up to date with it. Earlier, 2026-11-17: UI-6's second list, Sessions, Locks and Watches, delivered and archived; sections 4.2 and 5 brought up to date with it. Earlier the same day: the list written and linked. Earlier, 2026-11-15: UI-6's Key/Value list delivered and archived. Earlier the same day: UI-6 started, its Key/Value list first; the event query's key filter in section 4. Earlier the same day: UI-5 delivered: sections 4 to 7 brought up to date with it, open question 5 decided, browser automation deferred again. Earlier the same day: UI-4 delivered, and sections 4 and 5 brought up to date with it. Earlier, 2026-11-14: UI-3 delivered, open question 3 settled, and sections 4 and 5 brought up to date with it. Earlier the same day: UI-2 delivered and its task list archived. Earlier the same day: sections 4 and 5 reviewed against the code as UI-2 started, and the view map given a Done status. Earlier the same day: UI-0 and UI-1 delivered, and their task list archived, its links updated. Earlier, 2026-11-13: UI-0 resumed: section 4 notes what the backend lists built since it was last updated, to be reviewed when UI-2 starts; the embedded-interface task-list link refreshed. Earlier, 2026-11-01: `409 policy_in_use` removed, as the owner decided for the ACL list's proposal 18. Earlier the same day: the ACL list aligned with Consul; its proposal numbers stand. Earlier the same day: dated task-list link refreshed. Earlier, 2026-10-31: section 4: a health entry carries its node's status, and `?passing` leaves out an unreachable node's instances. Earlier, 2026-10-30: open question 5's facts corrected: a client now removes other services on its node, in its own tenant and namespace. Earlier, 2026-10-27, later the same day, after the review of the interface against the ACL list: access control moves from UI-6 to UI-5 with the security profile, sign-in, status, tokens, policies and explanations; server removal joins UI-5; section 4.2 gains the profile and the explanation endpoint; the client rows' data; open questions 5 and 6. Earlier that day: section 3: the asset manifest's file name in the Vite build; sections 4.2, 5 and 6: tokens and policies come from the ACL list, and roles and authentication methods are reserved; the embedded-interface task-list link refreshed. Earlier, 2026-10-26: section 4.1, the service writes are on `PUT /v1/catalog/register` and `/deregister` after the client list's Phase 1. Earlier, 2026-10-21: dated task-list links refreshed; the administrative interface remains paused after Step 1 while backend delivery continues. Earlier, 2026-10-09: section 4.1: the node list is at `/v1/catalog/nodes`, the node writes are listed, and bare `/health` is gone, after the single-POM list's Phase 4. On 2026-10-05: the build location and the tenancy owner, after the move to one Maven project; section 4 was brought up to date with scoped reads and the Raft operator endpoints on 2026-10-02)
-**Design:** [`QRAFT_ADMIN_UI_UX_DESIGN.md`](QRAFT_ADMIN_UI_UX_DESIGN.md) (what the interface is) and
-[`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), sections
+**Design:** [`QRAFT_ADMIN_UI_UX_DESIGN.md`](../../docs-design/QRAFT_ADMIN_UI_UX_DESIGN.md) (what the interface is) and
+[`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](../../docs-design/QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), sections
 12.4, 12.4.1, and 19.6 (how it is packaged and served)
-**Standards:** [`PROJECT_STANDARDS.md`](../docs/PROJECT_STANDARDS.md)
+**Standards:** [`PROJECT_STANDARDS.md`](../PROJECT_STANDARDS.md)
 
 ## 1. Purpose
 
@@ -44,7 +46,7 @@ rest of the platform is. This plan changes only when scope or ordering changes.
 ## 3. Technology baseline
 
 The stack was agreed in
-[`task-list-embedded-admin-interface-2026-11-14.md`](../docs/archive/task-list-embedded-admin-interface-2026-11-14.md),
+[`task-list-embedded-admin-interface-2026-11-14.md`](task-list-embedded-admin-interface-2026-11-14.md),
 section 4.1, after reviewing the `peegeeq-management-ui` and
 `peegeeq-utilities-ui` modules:
 
@@ -73,7 +75,7 @@ section 4.1, after reviewing the `peegeeq-management-ui` and
 ## 4. API readiness
 
 **Reviewed against the code on 2026-11-14**, when UI-2 started
-([`task-list-admin-ui-scoped-discovery-2026-11-14.md`](../docs/archive/task-list-admin-ui-scoped-discovery-2026-11-14.md),
+([`task-list-admin-ui-scoped-discovery-2026-11-14.md`](task-list-admin-ui-scoped-discovery-2026-11-14.md),
 section 2). The tables had last been brought up to date on 2026-11-01, before
 the backend lists of 2026-11-04 to 2026-11-09 (handover, section 1); each row
 now states what the code provides on that date, brought up to date with UI-3 and,
@@ -212,7 +214,7 @@ The shared frontend pieces also land here:
 No backend prerequisites.
 
 UI-0 and UI-1 together were the scope of
-[`task-list-embedded-admin-interface-2026-11-14.md`](../docs/archive/task-list-embedded-admin-interface-2026-11-14.md),
+[`task-list-embedded-admin-interface-2026-11-14.md`](task-list-embedded-admin-interface-2026-11-14.md),
 completed and archived on 2026-11-14. UI-2 is the next increment; it waits for
 its backend work and the review of section 4.
 
@@ -230,7 +232,7 @@ replicated tenants exist (UI-6); the Services list on the summary endpoint; and
 the Health Checks page.
 
 Delivered 2026-11-14 in
-[`task-list-admin-ui-scoped-discovery-2026-11-14.md`](../docs/archive/task-list-admin-ui-scoped-discovery-2026-11-14.md):
+[`task-list-admin-ui-scoped-discovery-2026-11-14.md`](task-list-admin-ui-scoped-discovery-2026-11-14.md):
 replicated tenants already existed, so the scope selector lists them (open
 question 2). UI-3 is the next increment.
 
@@ -251,7 +253,7 @@ Views:
 - Raft Members, read-only (membership changes are not offered);
 - Storage & Snapshots, including the persistent fenced banner.
 
-Delivered 2026-11-14 in [`task-list-admin-ui-operate-2026-11-14.md`](../docs/archive/task-list-admin-ui-operate-2026-11-14.md), with UI-2's open items: the client's
+Delivered 2026-11-14 in [`task-list-admin-ui-operate-2026-11-14.md`](task-list-admin-ui-operate-2026-11-14.md), with UI-2's open items: the client's
 fallback for unrouted paths, the redirect from `/`, gzip for text assets, and
 the bundle split.
 
@@ -274,7 +276,7 @@ Views:
 - the consistency selector;
 - live updates with pause and resume, and history-gap resynchronization.
 
-Delivered 2026-11-15 in [`task-list-admin-ui-events-configuration-live-2026-11-15.md`](../docs/archive/task-list-admin-ui-events-configuration-live-2026-11-15.md).
+Delivered 2026-11-15 in [`task-list-admin-ui-events-configuration-live-2026-11-15.md`](task-list-admin-ui-events-configuration-live-2026-11-15.md).
 The event architecture's phases 1 to 4 and the event query were there already
 (events list); UI-4 added the scope and service filters, the configuration read,
 and the answering-server and consistency headers. Export of events waits for
@@ -314,7 +316,7 @@ Access control comes here, not with governance in UI-6, because every
 mutation depends on it and an operator needs to manage tokens from the first
 mutation onwards.
 
-Delivered 2026-11-15 in [`task-list-admin-ui-access-mutations-2026-11-15.md`](../docs/archive/task-list-admin-ui-access-mutations-2026-11-15.md).
+Delivered 2026-11-15 in [`task-list-admin-ui-access-mutations-2026-11-15.md`](task-list-admin-ui-access-mutations-2026-11-15.md).
 The ACL list had built the authentication, authorization, explanation and lock-out
 features, and every request under a token was already audited; UI-5 added the
 security status read, the interface's sign-in, session, token menu, banners and
@@ -347,15 +349,15 @@ Views:
 
 This increment is large enough to be split into several task lists when it is
 reached. Started 2026-11-15 as three: Key/Value, delivered the same day in
-[`task-list-admin-ui-key-value-2026-11-15.md`](../docs/archive/task-list-admin-ui-key-value-2026-11-15.md), with
+[`task-list-admin-ui-key-value-2026-11-15.md`](task-list-admin-ui-key-value-2026-11-15.md), with
 the event query's key filter, every update and deletion a compare-and-set, and
 the address in the query, since a key may end in `/` or hold a dot; then
 Sessions, Locks and Watches, with acquire and release, delivered 2026-11-17 in
-[`task-list-admin-ui-sessions-locks-watches-2026-11-17.md`](../docs/archive/task-list-admin-ui-sessions-locks-watches-2026-11-17.md),
+[`task-list-admin-ui-sessions-locks-watches-2026-11-17.md`](task-list-admin-ui-sessions-locks-watches-2026-11-17.md),
 with the leader's TTL deadlines, the held keys across scopes, a destroy's
 cause and the event query's `session` filter on the server; then Tenants,
 Namespaces and Audit, delivered 2026-11-18 in
-[`task-list-admin-ui-tenants-namespaces-audit-2026-11-18.md`](../docs/archive/task-list-admin-ui-tenants-namespaces-audit-2026-11-18.md),
+[`task-list-admin-ui-tenants-namespaces-audit-2026-11-18.md`](task-list-admin-ui-tenants-namespaces-audit-2026-11-18.md),
 with the tenancy domain events, what each scope holds, each audit record's
 scope and the read of a server's audit file on the server, and the grouped
 navigation. Its check in a browser found that a page kept in the browser's
@@ -418,16 +420,16 @@ contracts exist.
 1. **Default state before authentication.** Decided 2026-09-27. The read-only
    interface is enabled by default before UI-5, with a startup warning that it
    is unauthenticated
-   ([`task-list-embedded-admin-interface-2026-11-14.md`](../docs/archive/task-list-embedded-admin-interface-2026-11-14.md),
+   ([`task-list-embedded-admin-interface-2026-11-14.md`](task-list-embedded-admin-interface-2026-11-14.md),
    decision 4).
 2. **Source of scope options.** Settled 2026-11-14 by the code: replicated
    tenants and namespaces exist with an API (tenancy list), and a registration
    needs its scope to exist, so the scope selector lists them and UI-2 did not
-   wait ([`task-list-admin-ui-scoped-discovery-2026-11-14.md`](../docs/archive/task-list-admin-ui-scoped-discovery-2026-11-14.md),
+   wait ([`task-list-admin-ui-scoped-discovery-2026-11-14.md`](task-list-admin-ui-scoped-discovery-2026-11-14.md),
    decision 1). The question was: until replicated tenants exist (UI-6), should
    the scope selector list only the scopes present in the catalog, or should
    UI-2 wait for replicated tenants?
-3. **Membership reads.** Settled 2026-11-14 ([`task-list-admin-ui-operate-2026-11-14.md`](../docs/archive/task-list-admin-ui-operate-2026-11-14.md), decision 5, taken
+3. **Membership reads.** Settled 2026-11-14 ([`task-list-admin-ui-operate-2026-11-14.md`](task-list-admin-ui-operate-2026-11-14.md), decision 5, taken
    under the owner's instruction not to pause, reversible): a follower answers
    its own partial view, labelled, with the leader it knows and null progress.
    The question was: only the leader knows its peers' match indexes and contact
