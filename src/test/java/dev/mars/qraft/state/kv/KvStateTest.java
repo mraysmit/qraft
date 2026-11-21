@@ -193,4 +193,25 @@ class KvStateTest {
                 kv.lockDelaysAfter(t0.plusSeconds(14)));
         assertEquals(List.of(), kv.lockDelaysAfter(t0.plusSeconds(15)), "a delay that has ended is not running");
     }
+
+    /**
+     * Code defects list, item 9: the release walked the map's own entries while it removed keys, and a TreeMap moves
+     * the next entry into a node it removes, so a delete session's lock delay could fall on the wrong key and one of
+     * its keys could be reported twice.
+     */
+    @Test
+    void aDeleteSessionsEndDeletesEachOfItsKeysOnceAndDelaysEachOne() {
+        KvState kv = new KvState();
+        java.time.Instant t0 = java.time.Instant.parse("2026-11-21T12:00:00Z");
+        // Another session's key first, so that removing b removes a node with two children.
+        assertTrue(kv.lock(ACME, "a", bytes("a"), 0, "s2", 1, t0));
+        for (String key : List.of("b", "c")) assertTrue(kv.lock(ACME, key, bytes(key), 0, "s1", 1, t0));
+
+        List<String> freed = kv.releaseSession("s1", true, 2, t0.plusSeconds(15)).stream().map(KvEntry::key).toList();
+
+        assertEquals(List.of("b", "c"), freed);
+        assertEquals(List.of("b", "c"), kv.lockDelaysAfter(t0).stream().map(KvState.LockDelay::key).toList(),
+                "each freed key has its lock delay");
+        assertEquals(List.of("a"), kv.held().stream().map(KvEntry::key).toList(), "the other session keeps its key");
+    }
 }
