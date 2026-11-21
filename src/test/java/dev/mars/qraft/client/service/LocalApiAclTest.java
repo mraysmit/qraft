@@ -112,6 +112,21 @@ class LocalApiAclTest {
         assertEquals(200, send("GET", "/v1/client/self", null, "agent").statusCode());
     }
 
+    /**
+     * Code defects list, item 14: the scheme is matched in any case, as the server's API does and as RFC 9110 says of
+     * an authentication scheme.
+     */
+    @Test
+    void theBearerSchemeIsReadInAnyCase() throws Exception {
+        start(DownPolicy.EXTEND_CACHE);
+
+        for (String scheme : List.of("Bearer", "bearer", "BEARER")) {
+            HttpRequest request = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + api.port()
+                    + "/v1/client/self")).header("Authorization", scheme + " agent").GET().build();
+            assertEquals(200, http.send(request, HttpResponse.BodyHandlers.ofString()).statusCode(), scheme);
+        }
+    }
+
     @Test
     void membersIsForwardedUnderTheCallersTokenElseTheDefault() throws Exception {
         start(DownPolicy.EXTEND_CACHE);
