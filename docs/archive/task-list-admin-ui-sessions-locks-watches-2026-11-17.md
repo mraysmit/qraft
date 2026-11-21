@@ -4,7 +4,7 @@
 **Status:** Complete and archived on 2026-11-17. Phases 0 to 5 are done, test first, and uncommitted. In the check copy, `mvn install`, the end-to-end and Docker stages and headless Chrome passed, with every log audited and none unflagged.
 **Last updated:** 2026-11-17 (Phases 0 to 5 done, the list complete and archived, its links rewritten from its new place. Earlier the same day: written, from a survey of the code at `a12393d`)
 **Active work:** complete on 2026-11-17
-**Implementation plan:** [`QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md`](../../docs-design/QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md), increment UI-6
+**Implementation plan:** [`QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md`](QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md), increment UI-6
 **Source plan:** [`QRAFT_ADMIN_UI_UX_DESIGN.md`](../../docs-design/QRAFT_ADMIN_UI_UX_DESIGN.md), sections 7.1, 7.2, 7.3, 11, 12 and 13; [`task-list-sessions-and-locks-2026-11-08.md`](task-list-sessions-and-locks-2026-11-08.md); [`task-list-event-query-and-watch-2026-11-08.md`](task-list-event-query-and-watch-2026-11-08.md)
 **Predecessor:** [`task-list-admin-ui-key-value-2026-11-15.md`](task-list-admin-ui-key-value-2026-11-15.md) (UI-6, part 1)
 **Standards:** [`PROJECT_STANDARDS.md`](../PROJECT_STANDARDS.md)
