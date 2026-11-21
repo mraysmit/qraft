@@ -38,7 +38,9 @@ export function outcomeOf(error: unknown): Outcome {
   if (error instanceof MalformedResponseError) return { kind: 'unknown', detail: error.message };
   if (!(error instanceof ApiError)) return { kind: 'unknown', detail: error instanceof Error ? error.message : String(error) };
   const { code, message } = error;
-  if (error.status === 0 || error.code.startsWith('http_5') || error.code === 'internal_error') {
+  // An outcome_unknown may have been applied, whatever its retryable flag says: servers before the code defects list
+  // marked it retryable (platform design section 9.1).
+  if (error.status === 0 || code.startsWith('http_5') || code === 'internal_error' || code === 'outcome_unknown') {
     return { kind: 'unknown', detail: message };
   }
   if (error.retryable) return { kind: 'retryable', code, message };
@@ -48,7 +50,10 @@ export function outcomeOf(error: unknown): Outcome {
   if (error.status === 409) return { kind: 'conflict', code, message };
   // A body over the server's limit is refused before it is read (UI-6 Key/Value task list, decision 7).
   if (error.status === 400 || error.status === 413) return { kind: 'validation', code, message };
-  return { kind: 'retryable', code, message };
+  // Any other refusal is not offered for retry: one from the server's side may have been applied, and one from the
+  // caller's side was refused.
+  if (error.status >= 500) return { kind: 'unknown', detail: message };
+  return { kind: 'validation', code, message };
 }
 
 function outcomeText(outcome: Outcome): string {
