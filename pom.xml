@@ -30,7 +30,8 @@
         <required.java.version>[27,)</required.java.version>
         <test.log.directory>${project.basedir}/logs</test.log.directory>
         <!-- The default build skips the suites that need Docker or wait out real TTLs and elections
-             (docs/TESTING.md). Select them with -Dgroups=docker,e2e and clear this with -Dtest.excludedGroups= -->
+             (docs/TESTING.md). Select them with -Dgroups=e2e or -Dgroups=docker,slow, and clear this with
+             -Dtest.excludedGroups= -->
         <test.excludedGroups>docker,slow,e2e</test.excludedGroups>
         <pitest.version>1.30.0</pitest.version>
         <pitest-junit5.version>1.2.3</pitest-junit5.version>
@@ -228,7 +229,7 @@
             <resource>
                 <directory>${project.basedir}/src/main/resources</directory>
             </resource>
-            <!-- The administrative interface's build output, below META-INF/qraft/ui/ (design section 12.4.1);
+            <!-- The administrative interface's build output, below META-INF/qraft/ui/ (design section 13.2);
                  it is never committed -->
             <resource>
                 <directory>${project.build.directory}/generated-resources/ui</directory>
@@ -600,8 +601,8 @@
             </build>
         </profile>
 
-        <!-- The batches of MembershipService's 39 mutants, each of at most ten (docs/TESTING.md has the
-             table). A batch names the methods it leaves out, and its mutators. -->
+        <!-- The batches of MembershipService's 39 mutants, each of at most ten. A batch names the methods it
+             leaves out, and its mutators. PIT is shelved (docs/TESTING.md, "Mutation testing with PIT"). -->
         <profile>
             <!-- join, its two lambdas, the constructor, and response: 9 mutants -->
             <id>pit-batch-01</id>
