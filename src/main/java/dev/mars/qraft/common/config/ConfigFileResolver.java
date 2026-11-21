@@ -89,6 +89,6 @@ public final class ConfigFileResolver {
     }
 
     private static IllegalArgumentException usage(String role) {
-        return new IllegalArgumentException("Usage: qraft-" + role + " [--config <path>]");
+        return new IllegalArgumentException("Usage: qraft " + role + " [--config <path>]");
     }
 }
