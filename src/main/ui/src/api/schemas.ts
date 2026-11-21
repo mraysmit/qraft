@@ -74,7 +74,7 @@ export const CatalogNodeSchema = z.object({
 /** `GET /v1/catalog/services`: each service name with its tags, in the request's scope. */
 export const ServiceNamesSchema = z.record(z.string(), z.array(z.string()));
 
-/** The five health states (platform design section 7.6). */
+/** The five health states (platform design section 5.4). */
 export const HealthSchema = z.enum(['UNKNOWN', 'PASSING', 'WARNING', 'CRITICAL', 'MAINTENANCE']);
 
 export const ServiceInstanceSchema = z.object({
@@ -218,7 +218,7 @@ export type ServiceInstance = z.infer<typeof ServiceInstanceSchema>;
 export type Check = z.infer<typeof CheckSchema>;
 export type HealthEntry = z.infer<typeof HealthEntrySchema>;
 
-/** An event's category and severity (event architecture sections 3 and 5). */
+/** An event's category and severity (event architecture sections 4 and 5). */
 export const EventCategorySchema = z.enum(['system', 'domain', 'observation', 'audit']);
 export const EventSeveritySchema = z.enum(['info', 'warning', 'error']);
 
