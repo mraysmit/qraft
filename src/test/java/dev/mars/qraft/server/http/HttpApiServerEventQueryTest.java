@@ -147,6 +147,8 @@ class HttpApiServerEventQueryTest {
         assertEquals(400, send("GET", "/v1/operator/events?after=nonsense", null).statusCode());
         assertEquals(400, send("GET", "/v1/operator/events?limit=1001", null).statusCode());
         assertEquals(400, send("GET", "/v1/operator/events?category=gossip", null).statusCode());
+        // Code defects list, item 12: an empty type matched nothing; it is refused as an empty key is.
+        assertEquals(400, send("GET", "/v1/operator/events?type=", null).statusCode(), "a blank type");
         assertEquals(405, send("PUT", "/v1/operator/events", "").statusCode());
     }
 
