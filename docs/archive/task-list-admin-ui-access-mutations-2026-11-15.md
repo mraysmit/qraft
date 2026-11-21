@@ -4,7 +4,7 @@
 **Status:** Complete and archived on 2026-11-15. Phases 0 to 4 are done, test first; Phase 0 is in `9b8b8a8`, Phases 1 to 3 in `851331c`, and Phase 4 with two fixes Jenkins build 80 and the check copy found is uncommitted. `mvn install`, the end-to-end stage and headless Chrome passed in the check copy with every log audited, none unflagged (section 9).
 **Last updated:** 2026-11-15 (Phase 4 done, the list complete and archived, its links rewritten from its new place; two defects found on the way fixed, test first: a forwarded write withdrawn before it was sent, and the test log lost after an interrupt. Earlier the same day: Phase 3 done, with its record. Earlier the same day: Phases 1 and 2 done, with their records; Jenkins build 79 passed `9b8b8a8`. Earlier the same day: Phase 0 done, decision 4's window corrected to the hour. Earlier the same day: written, at the owner's word to proceed after Jenkins build 78)
 **Active work:** complete on 2026-11-15
-**Implementation plan:** [`QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md`](../../docs-design/QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md), increment UI-5
+**Implementation plan:** [`QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md`](QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md), increment UI-5
 **Source plan:** [`QRAFT_ADMIN_UI_UX_DESIGN.md`](../../docs-design/QRAFT_ADMIN_UI_UX_DESIGN.md), sections 3.5, 3.7, 5.1, 9.2, 9.4, 10.2 and 11; [`task-list-acl-and-tokens-2026-11-07.md`](task-list-acl-and-tokens-2026-11-07.md), proposals 3 and 10 to 19
 **Predecessor:** [`task-list-admin-ui-events-configuration-live-2026-11-15.md`](task-list-admin-ui-events-configuration-live-2026-11-15.md) (UI-4)
 **Standards:** [`PROJECT_STANDARDS.md`](../PROJECT_STANDARDS.md)
