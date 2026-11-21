@@ -59,9 +59,39 @@ class AppConfigValidationTest {
 
     @Test
     void raftTimingIntervalsArePositive() {
-        accepted("\"raft\":{\"electionTimeoutMs\":1,\"heartbeatIntervalMs\":1}");
+        accepted("\"raft\":{\"electionTimeoutMs\":2,\"heartbeatIntervalMs\":1}");
         rejected("\"raft\":{\"electionTimeoutMs\":0}", "Raft timing intervals must be positive");
         rejected("\"raft\":{\"heartbeatIntervalMs\":0}", "Raft timing intervals must be positive");
+    }
+
+    /**
+     * Code defects list, item 15: a leader that sends heartbeats no more often than a follower's election timeout
+     * lets followers start elections against a healthy leader. Raft needs the broadcast time well below the election
+     * timeout; hashicorp/raft's {@code ValidateConfig} refuses an election timeout below its heartbeat timeout.
+     */
+    @Test
+    void theHeartbeatIntervalIsBelowTheElectionTimeout() {
+        rejected("\"raft\":{\"electionTimeoutMs\":1000,\"heartbeatIntervalMs\":1000}",
+                "server.raft.heartbeatIntervalMs (1000) must be less than server.raft.electionTimeoutMs (1000)");
+        rejected("\"raft\":{\"electionTimeoutMs\":1000,\"heartbeatIntervalMs\":1500}",
+                "server.raft.heartbeatIntervalMs (1500) must be less than server.raft.electionTimeoutMs (1000)");
+    }
+
+    /** Code defects list, item 15: a limit of zero or less refuses every command, so the cluster takes no write. */
+    @Test
+    void theLogHardLimitIsPositive() {
+        accepted("\"raft\":{\"logHardLimit\":1}");
+        rejected("\"raft\":{\"logHardLimit\":0}", "server.raft.logHardLimit must be positive, got: 0");
+        rejected("\"raft\":{\"logHardLimit\":-5}", "server.raft.logHardLimit must be positive, got: -5");
+    }
+
+    /** Code defects list, item 15: a negative wait has no meaning; zero is no wait. */
+    @Test
+    void theShutdownTimeoutsAreZeroOrMore() {
+        accepted("\"shutdown\":{\"drainTimeoutMs\":0,\"timeoutMs\":0}");
+        rejected("\"shutdown\":{\"drainTimeoutMs\":-1}",
+                "server.shutdown.drainTimeoutMs must not be negative, got: -1");
+        rejected("\"shutdown\":{\"timeoutMs\":-1}", "server.shutdown.timeoutMs must not be negative, got: -1");
     }
 
     @Test
