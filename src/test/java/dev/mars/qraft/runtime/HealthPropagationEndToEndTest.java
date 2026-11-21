@@ -23,7 +23,7 @@ import com.sun.net.httpserver.HttpServer;
 import dev.mars.qraft.client.QraftClient;
 import dev.mars.qraft.client.health.CheckStatus;
 import dev.mars.qraft.client.health.LocalStatusReporter;
-import dev.mars.qraft.testing.TestPorts;
+import dev.mars.qraft.testing.TestPortsHelper;
 import dev.mars.qraft.testing.fault.IntentionalErrorsHelper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Tag;
@@ -301,7 +301,7 @@ class HealthPropagationEndToEndTest {
 
     private static List<Integer> reserveDistinctPorts(int count) throws Exception {
         List<Integer> ports = new ArrayList<>();
-        for (int index = 0; index < count; index++) ports.add(TestPorts.freePort());
+        for (int index = 0; index < count; index++) ports.add(TestPortsHelper.freePort());
         return ports;
     }
 
