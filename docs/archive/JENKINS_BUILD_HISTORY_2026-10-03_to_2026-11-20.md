@@ -1,0 +1,1420 @@
+# Qraft on Jenkins: build history, 2026-10-03 to 2026-11-20
+
+**Archived:** 2026-11-21, by the documentation cleanup ([`task-list-documentation-cleanup-2026-11-21.md`](task-list-documentation-cleanup-2026-11-21.md)). Kept as a record; not updated since.
+
+This is the record of the Qraft job's builds 1 to 87 and of the local runs that stood in for Jenkins builds, moved
+from [`docs/JENKINS.md`](../JENKINS.md), which now describes the job as it is. The sections are as they were written,
+put in ascending date order; their links are rebased for this folder. Old module, class and role names in them are
+historical identifiers. Words such as "above" and "below" in a section refer to the order of the old file.
+
+## Summary
+
+One row per build the record identifies, and one per local-run section, in date order. Tests are default /
+end-to-end / Docker and `slow`, as stated; "Vitest" is the frontend count of the default stage. "Not stated" means the
+record does not give it. Builds 1 to 3 of 2026-10-03 ran on the old `Qraft` job before it was recreated, and the
+three diagnostic builds on the `Qraft-Diagnostics` job.
+
+| Record | Date | Commit | Result | Tests | Audit |
+|---|---|---|---|---|---|
+| [Build 1, old job](#initial-verification-2026-10-03) | 2026-10-03 | not stated | failed: 11 Docker failures or errors, `SIGSEGV` crashes | 812 / 7 / 23 run, 842 in all | not stated |
+| [Build 2, old job](#initial-verification-2026-10-03) | 2026-10-03 | not stated | failed: Maven JVM `SIGSEGV`, exit 134 | not stated | not stated |
+| [Build 3, old job](#memory-corruption-investigation-2026-10-03) | 2026-10-03 | `50e28d7` | failed: test JVM `SIGSEGV` after 314 passing tests | not stated | not stated |
+| [Qraft-Diagnostics 1](#memory-corruption-investigation-2026-10-03) | 2026-10-03 | not stated | diagnostic: JVM-mode runs, no safe workaround established | not applicable | not applicable |
+| [Qraft-Diagnostics 2](#memory-corruption-investigation-2026-10-03) | 2026-10-03 | not stated | diagnostic: native write/read mismatches | not applicable | not applicable |
+| [Qraft-Diagnostics 3](#memory-corruption-investigation-2026-10-03) | 2026-10-03 | not stated | diagnostic: `memtester` 6,537 failures, exit 6 | not applicable | not applicable |
+| [Build 1](#current-server-setup-2026-10-04) | 2026-10-04 | not stated | failed: first Docker class missed its startup deadline | 803 / 7 / all but the first Docker class passed | not stated |
+| [Build 2](#current-server-setup-2026-10-04) | 2026-10-04 | not stated | failed: one Docker recovery test timed out | 833 results | no container logs archived |
+| [Build 4](#current-server-setup-2026-10-04) | 2026-10-10 | `ce5890d` | passed, 7 min 18 s | 892 / 10 / 25, 927 results | no unflagged error recorded; 15 unflagged WARN traces found later (build 6) |
+| [Build 5](#current-server-setup-2026-10-04) | 2026-10-10 | `d4e1af8` | passed | 898 / 10 / 25, 933 results | no unflagged error recorded; 10 unflagged WARN traces found later (build 6) |
+| [Build 6](#current-server-setup-2026-10-04) | 2026-10-10 | `d0275a7` | passed, 8 min 28 s | 899 / 10 / 25, 934 results | 10 unflagged WARN stack traces (gRPC name resolution) |
+| [Build 7](#current-server-setup-2026-10-04) | 2026-10-10 | `cbb93f4` | failed as intended (red run), 1 min 23 s | 906 run, 5 failed; later stages skipped | not stated |
+| [Build 8](#current-server-setup-2026-10-04) | 2026-10-10 | `362b507` | failed: recovery test timed out, 9 min 55 s | 906 / 10 / 24 of 25, 942 results, 2 failed | two undeclared errors in the recovery class |
+| [Build 9](#current-server-setup-2026-10-04) | 2026-10-10 | `122d739` | passed, 7 min 45 s | 906 / 10 / 25, 941 results | all flagged |
+| [Build 10](#current-server-setup-2026-10-04) | 2026-10-10 | `aa0d876` | passed, 8 min 29 s | 913 / 10 / 25, 948 results | all flagged |
+| [Build 11](#current-server-setup-2026-10-04) | 2026-10-10 | `f2119d3` | passed, 9 min 1 s | 921 / 10 / 25, 956 results | all flagged |
+| [Builds 12, 13, 16 and 17](#suites-and-results-the-docker-stage-beside-peegeeq-2026-10-10) | 2026-10-10 | not stated | not recorded (the PeeGeeQ lock) | not stated | not stated |
+| [Build 14](#current-server-setup-2026-10-04) | 2026-10-10 | `0f6c497` | failed: 6 Docker tests | 925 / 10 / 26 passed, 6 failed, 967 results | outside the new class, all flagged |
+| [Build 15](#current-server-setup-2026-10-04) | 2026-10-10 | `da87cb3` | passed, 10 min 14 s | 925 / 10 / 32, 967 results | all flagged |
+| [Build 18](#current-server-setup-2026-10-04) | 2026-10-11 | `fac3696` | failed: 1 default test | 924 passed, 1 failed; later stages skipped | one unflagged Netty warning trace |
+| [Build 19](#current-server-setup-2026-10-04) | 2026-10-11 | `f9b3403` | passed, 10 min 34 s | 927 / 10 / 32, 969 results | all flagged |
+| [Build 20](#current-server-setup-2026-10-04) | 2026-10-11 | `3579736` | passed | 969 results | not stated |
+| [Build 21](#current-server-setup-2026-10-04) | 2026-10-11 | `e3cf808` | passed | 927 / 10 / 32, 969 results | all flagged |
+| [Build 22](#current-server-setup-2026-10-04) | 2026-10-11 | `e3cf808` | failed: PIT dry run, configuration, 22 s | suites skipped | not stated |
+| [Build 23](#current-server-setup-2026-10-04) | 2026-10-11 | `03bea0f` | passed: PIT dry run, 75 s | 1,187 mutants generated; suites skipped | all flagged |
+| [Build 24](#current-server-setup-2026-10-04) | 2026-10-11 | not stated | aborted: PIT analysis, after two hours | suites skipped | not stated |
+| [Build 25](#current-server-setup-2026-10-04) | 2026-10-12 | `a37a684` | passed, ten minutes | 933 / 10 / 32, 975 results | all flagged |
+| [Build 26](#current-server-setup-2026-10-04) | 2026-10-12 | `9851987` | passed, ten minutes | 931 / 10 / 32, 973 results | all flagged |
+| [Local: Phase 7](#phase-7-local-verification-2026-10-13) | 2026-10-13 | `7a9108f`, `d876349`, `f737d6b` | passed | 960 default, 42 runtime | audited; outcome not stated |
+| [Build 27](#build-27-verification-2026-10-17) | 2026-10-17 | `bef4637` | passed, 10 min 12 s | 1,024 / 10 / 32, 1,066 results | all attributed |
+| [Build 28](#duration-boundary-replay-verification-2026-10-19) | 2026-10-19 | `bef4637` with a patch | failed: 1 assertion, 1 timeout | 72 focused | not stated |
+| [Build 29](#duration-boundary-replay-verification-2026-10-19) | 2026-10-19 | `bef4637` with a patch | failed as intended: 3 red assertions | 74 focused | not stated |
+| [Build 30](#duration-boundary-replay-verification-2026-10-19) | 2026-10-19 | `bef4637` with a patch | passed, 11 min 25 s | 1,028 / 10 / 32, 1,440 results with repeats | all attributed |
+| [Build 31](#membership-wiring-replay-verification-2026-10-19) | 2026-10-19 | `bef4637` with a patch | failed as intended: 7 red assertions | 91 focused | no unrelated application-log errors |
+| [Build 32](#membership-wiring-replay-verification-2026-10-19) | 2026-10-19 | `bef4637` with a patch | passed, 11 min 22 s | 1,059 / 10 / 32, 1,676 results with repeats | all attributed |
+| [Build 33](#lost-quorum-recovery-verification-2026-10-24) | 2026-10-24 | `55fbb1c` | passed, 718 s | 1,138 / 10 / 34 | all flagged |
+| [Build 34](#builds-34-and-35-2026-10-24) | 2026-10-24 | not stated | failed: 1 default test, 91 s | later stages skipped | not stated |
+| [Build 35](#builds-34-and-35-2026-10-24) | 2026-10-24 | not stated | failed: 2 Docker errors, 1,288 s | 1,148 / 10 / 38 of 40 | not stated |
+| [Build 36](#builds-34-and-35-2026-10-24) | not stated | `3b3fe38` | passed, 1,196 s | 1,153 / 10 / 40 | recorded all flagged; see note 1 |
+| [Build 37](#builds-34-and-35-2026-10-24) | not stated | `888892e` | failed: Docker log audit, 1,156 s | 1,153 / 10 / Docker failed | one undeclared error |
+| [Build 38](#builds-34-and-35-2026-10-24) | not stated | `adecfbc` | passed, 1,178 s | 1,164 / 10 / 40 | recorded all flagged; see note 1 |
+| [Build 39](#builds-34-and-35-2026-10-24) | not stated | `ffdec45` | passed, 1,199 s | 1,164 / 10 / 40 | recorded all flagged; see note 1 |
+| [Build 42](#builds-34-and-35-2026-10-24) | not stated | `2dcb2ec` | failed: 3 Docker errors | 1,189 / 10 / 41 run | not stated |
+| [Builds 43, 44 and 45](#builds-34-and-35-2026-10-24) | not stated | `9c946ac` | passed, about 1,280 s each | 1,190 / 10 / 41 | recorded all flagged; see note 1 |
+| [Builds 46 and 49](#builds-34-and-35-2026-10-24) | not stated | `7136209` | passed | 1,196 / 10 / 41 | recorded all flagged; see note 1 |
+| [Builds 47, 50, 51, 52 and 53](#builds-34-and-35-2026-10-24) | not stated | `7136209` | failed before any test: checkout or Jenkinsfile fetch | none ran | not stated |
+| [Builds 48 and 54](#builds-34-and-35-2026-10-24) | not stated | `7136209` | failed: Docker image build could not reach Docker Hub | default and end-to-end passed | not stated |
+| [Build 55](#builds-34-and-35-2026-10-24) | 2026-10-26 | `7136209` | passed | 1,196 / 10 / 41 | recorded all flagged; see note 1 |
+| [Local: in place of Jenkins](#local-run-in-place-of-jenkins-2026-10-27) | 2026-10-27 and 28 | `7a1ed98` to `ee11971` | eight runs; the last passed | last: 1,233 / 10 / 43 | last: all flagged |
+| [Build 56](#builds-56-to-63-2026-10-30-to-2026-11-01) | 2026-10-30 to 11-01 | `c33a2f2` | passed, 24 min 33 s | 1,315 / 11 / 43, 1,369 | all flagged |
+| [Build 57](#builds-56-to-63-2026-10-30-to-2026-11-01) | 2026-10-30 to 11-01 | `a2459ee` | passed, 24 min 14 s | 1,375 / 11 / 43, 1,429 | all flagged |
+| [Build 58](#builds-56-to-63-2026-10-30-to-2026-11-01) | 2026-10-30 to 11-01 | `1a60239` | passed, 23 min 58 s | 1,408 / 11 / 43, 1,462 | all flagged |
+| [Build 59](#builds-56-to-63-2026-10-30-to-2026-11-01) | 2026-10-30 to 11-01 | `8afd904` | passed, 23 min 58 s | 1,426 / 12 / 43, 1,481 | all flagged |
+| [Build 60](#builds-56-to-63-2026-10-30-to-2026-11-01) | 2026-10-30 to 11-01 | `01b44d4` | passed, 24 min 17 s | 1,429 / 13 / 43, 1,485 | all flagged |
+| [Build 61](#builds-56-to-63-2026-10-30-to-2026-11-01) | 2026-10-30 to 11-01 | `6a5c4e5` | passed, 24 min 23 s | 1,446 / 13 / 43, 1,502 | all flagged |
+| [Build 62](#builds-56-to-63-2026-10-30-to-2026-11-01) | 2026-10-30 to 11-01 | `a0a2cda` | passed, 24 min 28 s | 1,450 / 13 / 44, 1,507 | all flagged |
+| [Build 63](#builds-56-to-63-2026-10-30-to-2026-11-01) | 2026-10-30 to 11-01 | `5bc7729` | passed, 24 min 26 s | 1,450 / 13 / 44, 1,507 | all flagged |
+| [Build 64](#build-64-2026-11-07) | 2026-11-07 | `b33d594` | passed, 25 min 9 s; not accepted | 1,598 / 13 / 44, 1,655 | 28 unflagged error lines, 24 unflagged traces |
+| [Build 65](#build-65-2026-11-07) | 2026-11-07 | `bb1101a` | passed, 24 min 44 s | 1,603 / 13 / 44, 1,660 | all flagged but the console's echo of the commit message |
+| [Build 66](#build-66-2026-11-07) | 2026-11-07 | `f833761` | passed, 24 min 46 s | 1,684 / 16 / 45, 1,745 | one unflagged collector WARN line |
+| [Local runs](#local-runs-2026-11-07) | 2026-11-07 | `f833761` with fixes | first failed, final passed | final: 1,686 / 16 / 45 | final: all flagged |
+| [Local: transport security](#local-runs-for-transport-security-2026-11-07-and-08) | 2026-11-07 and 08 | uncommitted | passed, two runs | final: 1,743 / 17 / 46 | all flagged |
+| [Local: key/value](#local-runs-for-keyvalue-2026-11-08) | 2026-11-08 | uncommitted | passed, two runs | final: 1,782 / 18 / 47 | all flagged |
+| [Local: consistency](#local-runs-for-consistency-2026-11-08) | 2026-11-08 | uncommitted | first failed, rerun passed | 1,797 / 19 / 48 | all flagged |
+| [Local: sessions and locks](#local-runs-for-sessions-and-locks-2026-11-08) | 2026-11-08 | uncommitted | first failed, final passed | 1,819 / 20 / 49 | all flagged |
+| [Local: tenancy](#local-runs-for-tenancy-2026-11-08) | 2026-11-08 | uncommitted | first failed, rerun passed | 1,839 / 21 / 50 | all flagged |
+| [Local: observability](#local-runs-for-observability-2026-11-08) | 2026-11-08 | uncommitted | two failed, third passed | 1,851 / 22 / 51 | all flagged |
+| [Local: events](#local-runs-for-events-2026-11-08) | 2026-11-08 | uncommitted | first failed, rerun passed | 1,867 / 22 / 51 | all flagged |
+| [Local: authentication and audit](#local-runs-for-authentication-and-audit-2026-11-08) | 2026-11-08 | uncommitted | passed, Docker run again alone | 1,881 / 23 / 51 | all flagged |
+| [Local: catalog indexes](#local-runs-for-catalog-indexes-2026-11-08) | 2026-11-08 | uncommitted | passed | 1,883 / 23 / 51 | all flagged |
+| [Local: event query and watch](#local-runs-for-event-query-and-watch-2026-11-08) | 2026-11-08 | uncommitted | passed | 1,890 / 24 / 51 | all flagged |
+| [Local: five lists](#local-runs-for-the-client-library-the-endpoint-metric-certificate-reloading-the-kubernetes-auth-method-and-write-forwarding-2026-11-08) | 2026-11-08 | uncommitted | earlier run failed, final passed | 1,918 / 28 / 51 | all flagged |
+| [Local: DNS discovery](#local-runs-for-dns-discovery-2026-11-09) | 2026-11-09 | `4da64d8` | passed | 1,968 / 29 / 51 | all flagged |
+| [Local runs](#local-runs-2026-11-13) | 2026-11-13 | `653e2ce`, then fixes | first failed, second stopped, final passed with end-to-end rerun | final: 1,972 / 29 / 51 | final: all flagged |
+| [Build 67](#build-67-2026-11-13) | 2026-11-13 | `4d5f6d5` | passed, 28 min 37 s | 1,972 / 29 / 51, 2,052 | all flagged |
+| [Build 68](#build-68-2026-11-14) | 2026-11-14 | `bf945df` | passed, 28 min 33 s | 1,993 / 29 / 51, 2,073; Vitest 9 | all flagged |
+| [Build 69](#build-69-2026-11-14) | 2026-11-14 | `75b133b` | passed, 29 min 50 s | 1,997 / 29 / 51, 2,077; Vitest 49 | all flagged |
+| [Build 70](#build-70-2026-11-14) | 2026-11-14 | `a3bacde` | passed, 30 min 41 s | 1,997 / 31 / 52, 2,080; Vitest 49 | all flagged |
+| [Build 71](#build-71-2026-11-14) | 2026-11-14 | `587a315` | passed, 30 min 36 s | 1,998 / 31 / 52, 2,081; Vitest 49 | all flagged |
+| [Build 72](#build-72-2026-11-14) | 2026-11-14 | `3b6a706` | failed: 1 Vitest test, 3 min 22 s | 2,013 Java passed; Vitest 69 of 70 | unflagged lines only the failure's report |
+| [Build 73](#build-73-2026-11-14) | 2026-11-14 | `3bf28b1` | failed: 1 Java log audit, 2 min 47 s | 2,012 of 2,013; Vitest 73 | unflagged lines only that error and its reports |
+| [Build 74](#build-74-2026-11-14) | 2026-11-14 | `f550299` | passed, 31 min 35 s | 2,013 / 31 / 52, 2,096; Vitest 73 | all flagged |
+| [Build 75](#build-75-2026-11-14) | 2026-11-14 | `4a3f019` | failed: 1 Vitest test in the Docker stage, 31 min 28 s | 2,026 / 31 / 52; Vitest 94 | unflagged lines only the failure's report |
+| [Build 76](#build-76-2026-11-14) | 2026-11-14 | `541ede3` | passed, 30 min 33 s | 2,028 / 31 / 52, 2,111; Vitest 95 | all flagged |
+| [Build 77](#build-77-2026-11-15) | 2026-11-15 | `67ea3c4` | failed: 1 end-to-end test, 29 min 14 s | 2,041 / 31 of 32 / 52; Vitest 132 | unflagged lines only the failure's report |
+| [Build 78](#build-78-2026-11-15) | 2026-11-15 | `b108357` | passed, 30 min 17 s | 2,041 / 32 / 52; Vitest 132 | all flagged |
+| [Build 79](#build-79-2026-11-15) | 2026-11-15 | `9b8b8a8` | passed, 31 min 1 s | 2,046 / 32 / 52; Vitest 132 | all flagged |
+| [Build 80](#build-80-2026-11-15) | 2026-11-15 | `851331c` | failed: 1 default test, 3 min 23 s | 2,046 of 2,047 | unflagged lines only the failure's report |
+| [Build 81](#build-81-2026-11-15) | 2026-11-15 | `be77ac8` | failed: 1 default test, 2 min 51 s | 2,052 of 2,053 | unflagged lines only the failure's report |
+| [Build 82](#build-82-2026-11-15) | 2026-11-15 | `0d2b53b` | passed, 30 min 20 s | 2,053 / 33 / 52; Vitest 220 | all flagged |
+| [Build 83](#build-83-2026-11-15) | 2026-11-15 | `1a4ca7d` | failed: 1 Vitest test, 3 min 27 s | 2,053 Java; Vitest 220 of 221 | unflagged lines only the failure's report |
+| [Build 84](#build-84-2026-11-15) | 2026-11-15 | `f45bf2a` | passed, 30 min 41 s | 2,055 / 33 / 52; Vitest 225 | all flagged |
+| [Local: UI-6 Sessions, Locks and Watches](#local-runs-for-ui-6s-sessions-locks-and-watches-2026-11-17) | 2026-11-17 | `a12393d` with uncommitted work | passed | 2,070 / 35 / 52; Vitest 329 | all flagged |
+| [Local: UI-6 Tenants, Namespaces and Audit](#local-runs-for-ui-6s-tenants-namespaces-and-audit-2026-11-18) | 2026-11-18 | `5aab391` with uncommitted work | Docker stage exited 1 on Vitest after its tests | 2,078 / 36 / 52; Vitest 373 | nine unflagged lines, the Vitest timeouts and their report |
+| [Local: `e954c89` and the image build](#local-runs-on-e954c89-and-the-docker-image-builds-time-limit-2026-11-19) | 2026-11-19 | `e954c89`, then with the fix | first failed (1 Docker error), second passed | second: 2,083 / 36 / 52; Vitest 374 | second: all flagged |
+| [Build 85](#build-85-2026-11-20) | 2026-11-20 | `000c02a` | failed: 1 end-to-end test and the Docker post step, 32 min 5 s | 2,083 / 35 of 36 / 52; Vitest 374; 2,119 reported | unflagged lines only the two causes |
+| [Build 86](#build-86-2026-11-20) | 2026-11-20 | `8297836` | passed, about 33 min | 2,086 / 36 / 52, 2,174; Vitest 374 | all flagged |
+| [Local: open items](#local-runs-for-the-open-items-2026-11-20) | 2026-11-20 | `8297836` with the list's files | passed | 2,094 / 36 / 52; Vitest 379 | all flagged |
+| [Build 87](#build-87-2026-11-20) | 2026-11-20 | `1143f27` | passed, 30 min 23 s | 2,094 / 36 / 52, 2,182; Vitest 379 | all flagged |
+
+Build 3 of the recreated job and builds 40 and 41 are not recorded.
+
+Note 1: the section on builds 34 and 35 adds, with the image-build retry's removal on 2026-10-27, that the retry's unit
+test had left two unflagged `#13 ERROR` lines in every default run since build 36; the audits recorded for those builds
+do not mention them.
+
+## Historical: the memory fault, 2026-10-03
+
+The two sections below describe the Jenkins server as it was on 2026-10-03, when its memory was
+faulty. They are kept as a record. The `Qraft` job was recreated on 2026-10-04, so the build links in them now
+open the current job's builds of the same number, not the builds described, and the
+`Qraft-Diagnostics` links may no longer resolve.
+
+### Initial verification, 2026-10-03
+
+[Build 1](http://192.168.137.32:8080/job/Qraft/1/) ran 842 tests: 812 default tests and all coverage gates
+passed, all 7 end-to-end tests passed, and the Docker suite ran 23 tests with 11 failures/errors.
+The second-agent and storage-lock fixtures exposed the temporary-file permissions issue above.
+Other Docker failures included native Java `SIGSEGV` crashes; container logs and JVM fatal-error reports
+were retained under `logs/docker-diagnostics` in that build's artifacts.
+
+[Build 2](http://192.168.137.32:8080/job/Qraft/2/) applied the fixture fix but the host Maven JVM crashed
+with `SIGSEGV` and exit code 134 before completing the reactor, so the fix remains unverified by the
+full suite. The host Docker CLI also crashed with `SIGSEGV` during an isolated diagnostic check.
+These observations require server-level diagnosis; neither increasing test timeouts nor rerunning
+unchanged tests establishes compatibility. No recurring build trigger is enabled.
+
+### Memory corruption investigation, 2026-10-03
+
+[Build 3](http://192.168.137.32:8080/job/Qraft/3/) verified checkout of the published CI revision
+`50e28d75c634f79d5c23b64d0fb2addfbe9aced2`. It stopped after 314 reported passing tests when the
+controller test JVM received `SIGSEGV` in `PcDescContainer::find_pc_desc_internal`. Its fatal-error
+report is archived as `qraft-controller/hs_err_pid42492.log`.
+
+The Linux server is a VMware VM named `ubu24-cicd`, reporting four virtual CPUs with an Intel
+Core i7-10710U CPU model and 16 GiB RAM. The investigation confirmed memory corruption visible
+inside this environment; it has not identified whether the faulty component is host RAM, CPU,
+the hypervisor, or another part of the host memory path.
+
+The manually triggered [Qraft-Diagnostics job](http://192.168.137.32:8080/job/Qraft-Diagnostics/)
+retains the diagnostic sources, logs, and results:
+
+- [Diagnostic build 1](http://192.168.137.32:8080/job/Qraft-Diagnostics/1/) ran the affected
+  `HttpApiServerOperatorTest` twice per JVM mode, with JaCoCo disabled. Baseline runs returned
+  134 and 0; disabling compact object headers returned 0 and 0; disabling the JIT with `-Xint`
+  returned 0 and 134. These short runs do not establish a safe JVM workaround. The standalone
+  Java probes in this first diagnostic build did not execute because Java 21's installation
+  contained no `javac`; build 2 corrected compilation using Java 25 with `--release 21`.
+- [Diagnostic build 2](http://192.168.137.32:8080/job/Qraft-Diagnostics/2/) found mismatches in
+  a 256 MiB native C write/read check compiled both with `gcc -O2` and with `gcc -O0`. For example,
+  the optimized check wrote `ed9d8b3def82b11a` and read `ed9d8b3d6f82b11a`; the unoptimized check
+  wrote `e6f56c85b11a8c32` and read `e6f56c85911a8c32`. The probe uses volatile memory and unsigned
+  arithmetic, with no Java, Docker, Qraft, or instrumentation. Three short standalone probes each
+  on Java 21, 25, and 27 passed; intermittent corruption cannot be ruled out by these passes.
+- [Diagnostic build 3](http://192.168.137.32:8080/job/Qraft-Diagnostics/3/) independently verified
+  corruption with Ubuntu's `memtester` 4.6.0. The full requested **256 MiB allocation was locked**;
+  it reported **6,537 failure messages** in address-pattern and data comparisons and exited **6**.
+  The complete evidence is archived as `logs/memtester-locked.log`. Build 2's earlier memtester
+  run had reduced its allocation to the Jenkins user's 8 MiB lock limit and passed; it did not
+  test the full requested memory.
+
+The diagnostic utility was downloaded through Ubuntu's configured APT repository and extracted
+into the diagnostic workspace, without installing an OS package. The full locked check ran in a
+temporary container with read-only mounts of the utility and host C libraries. Its container was
+removed after completion. No global Jenkins, Java, Docker, or VM settings were changed.
+
+At the time, further diagnosis needed access to the machine hosting the VM, and the fixture fix
+and the full pipeline were unverified. The fault has since been resolved and the job recreated;
+see "Current server setup" above for the runs on the current server.
+
+## Current server setup, 2026-10-04
+
+The memory fault recorded in the historical sections below is resolved, and the `Qraft` job was
+recreated on the current Jenkins server as a Pipeline from SCM using `main` and
+the root `Jenkinsfile`. The built-in node retains its `peegeeq-linux` label and also has the `linux`
+label required by this pipeline. The job is manually triggered, prevents concurrent runs, and retains
+20 builds plus artifacts from the latest 10 builds.
+
+[Build 1](http://192.168.137.32:8080/job/Qraft/1/) verified checkout, JDK 27 provisioning, Maven,
+Docker, report publication, and artifact archival. Its 803 default tests and 7 end-to-end tests passed.
+The first Docker class exceeded its 15-second cluster startup deadline while Testcontainers downloaded
+the `alpine/socat` helper image; the remaining Docker classes passed.
+
+[Build 2](http://192.168.137.32:8080/job/Qraft/2/) confirmed the cached-startup case: both
+`DockerRunningPartitionTest` tests passed. It published 833 JUnit results and 682 artifacts. One Docker
+recovery case remained red:
+`DockerAgentRecoveryTest.aKilledFollowerInstallsTheLeadersSnapshotAndThenHoldsTheLeadersHealthState`
+timed out after 90 seconds while waiting for the restarted follower to install and expose the leader's
+snapshot state. This is a test/product integration result rather than a Jenkins configuration failure.
+Finding its cause is a task in Phase 6 of
+[the single-POM task list](task-list-single-pom-and-quorus-removal-2026-10-21.md).
+It was analysed on 2026-10-10. This build archived no container logs, so its cause cannot be proven
+from it. Build 8 failed the same way with the logs kept: the test had killed the follower while it wrote
+its first snapshot, and a server then refused to start on an unpublished first snapshot, by design. An earlier
+explanation, a deadline hidden in the client profile, was not the cause. That limit was real, and the
+test keeps the client profile that removes it, `client-long-ttl.json`. The task list has the reasoning.
+
+[Build 4](http://192.168.137.32:8080/job/Qraft/4/), of 2026-10-10 on commit `ce5890d`, is the first
+complete pass of the pipeline on this server. It took 7 minutes 18 seconds.
+- Default build: 892 tests, every coverage gate met. End-to-end: 10. Docker and slow: 25.
+- Jenkins published 927 results, none failed or skipped, and archived 801 files.
+- The 101 archived log files hold no unflagged error.
+- The recovery test that timed out in build 2 passed. Its cause is still not known, so its task in
+  Phase 6 stays open: one pass does not explain an intermittent failure.
+
+[Build 5](http://192.168.137.32:8080/job/Qraft/5/), of the same day on commit `d4e1af8`, passed as
+well: 898 default tests, 10 end-to-end, and 25 Docker and slow, 933 results in all, with no unflagged
+error in its archived logs.
+
+[Build 6](http://192.168.137.32:8080/job/Qraft/6/), of the same day on commit `d0275a7`, verified
+Phase 6 of the single-POM task list. It took 8 minutes 28 seconds, with a PeeGeeQ build running beside it.
+- Default build: 899 tests, every coverage gate met. End-to-end: 10. Docker and slow: 25.
+- Jenkins published 934 results, none failed or skipped, and archived 817 files.
+- The console and the 104 archived log files hold 691 flagged ERROR events, counting copies, and one
+  flagged uncaught exception. No ERROR event and no uncaught exception is without a flag.
+- Ten WARN events in the container logs carry a stack trace and no flag: gRPC reporting that it could
+  not resolve a peer's name. Nine are in `DockerDurableRestartTest`, one in `DockerClientTopologyTest`.
+  Builds 4 and 5 hold 15 and 10 of the same kind, which their records above do not mention: those audits
+  looked for ERROR events and uncaught exceptions only. These are unflagged errors under the logging
+  policy. Each comes from a server looking up a peer that its test has killed or disconnected. The
+  remedy, a definition for the event and a Docker audit that checks stack traces below ERROR, is
+  recorded in Phase 6 of the task list.
+- The recovery test that timed out in build 2 passed in 12.1 seconds with its new client profile.
+
+[Build 7](http://192.168.137.32:8080/job/Qraft/7/), of the same day on commit `cbb93f4`, failed, as
+intended: it is the red run of the fix for those warnings. The commit holds the new definition and seven
+new tests of the Docker log audit, without the change to the audit. `DockerLogCaptureTest` ran 27 tests
+with the 5 predicted failures. The default suite ran 906 tests with those 5 failures, and Jenkins skipped
+the end-to-end and Docker stages. It took 1 minute 23 seconds.
+
+[Build 8](http://192.168.137.32:8080/job/Qraft/8/), of the same day on commit `362b507`, is the green
+run of that fix, and failed for another reason. It took 9 minutes 55 seconds.
+- Default build: 906 tests passed, the 27 of `DockerLogCaptureTest` among them. End-to-end: 10 passed.
+- The container logs hold 17 gRPC name-resolution warnings, every one flagged, none without a flag.
+- Docker stage: `DockerClientRecoveryTest.aKilledFollowerInstallsTheLeadersSnapshotAndThenHoldsTheLeadersHealthState`
+  timed out after 90 seconds, as in build 2, and its class failed its log audit on two undeclared
+  errors. The other 24 tests passed. Jenkins published 942 results, 2 of them failed.
+- The follower's log gives the cause. The test killed it while it wrote its first snapshot. Started
+  again, it logged "Refusing startup because unpublished first snapshot /app/data/snapshot.dat.tmp has
+  no published /app/data/snapshot.dat" and ended. `docs/RAFT_STORAGE_OPERATIONS.md` documents that
+  refusal, so the defect is the test's: it must not kill a server before its first snapshot is published.
+  The fix is recorded in Phase 6 of the task list, and [TEST-RESULTS.md](TEST-RESULTS_2026-10-10.md) describes the
+  window and the tests of it.
+
+[Build 9](http://192.168.137.32:8080/job/Qraft/9/), of the same day on commit `122d739`, passed with
+that fix. It took 7 minutes 45 seconds.
+- Default build: 906 tests, every coverage gate met. End-to-end: 10. Docker and slow: 25.
+- Jenkins published 941 results, none failed or skipped, and archived 816 files.
+- The console and the 103 archived log files hold 710 flagged ERROR events, counting copies, and one
+  flagged uncaught exception. No ERROR event, no uncaught exception, and no stack trace is without a
+  flag. The 5 gRPC name-resolution warnings of this run are all flagged.
+- The recovery test passed in 13.0 seconds, and no server refused to start. One pass does not show
+  that a race is gone; the order the tests now keep does: none kills a server before its first snapshot
+  is published.
+
+[Build 10](http://192.168.137.32:8080/job/Qraft/10/), of the same day on commit `aa0d876`, passed. It is
+the first run on Jenkins of the seven tests that kill a server at each point of its first snapshot
+([TEST-RESULTS.md](TEST-RESULTS_2026-10-10.md)). It took 8 minutes 29 seconds.
+- Default build: 913 tests, every coverage gate met. End-to-end: 10. Docker and slow: 25.
+- Jenkins published 948 results, none failed or skipped, and archived 817 files.
+- The console and the 104 archived log files hold 610 flagged ERROR events, counting copies, and one
+  flagged uncaught exception. No ERROR event, no uncaught exception, and no stack trace is without a flag.
+
+[Build 11](http://192.168.137.32:8080/job/Qraft/11/), of the same day on commit `f2119d3`, passed. It is
+the first run on Jenkins of the change to recovery: an interrupted first snapshot is set aside and no
+longer stops a server, and a log compacted further than the published snapshot reaches is refused
+([TEST-RESULTS.md](TEST-RESULTS_2026-10-10.md)). It took 9 minutes 1 second.
+- Default build: 921 tests, every coverage gate met. End-to-end: 10. Docker and slow: 25.
+- Jenkins published 956 results, none failed or skipped, and archived 827 files.
+- The console and the 113 archived log files hold 887 flagged ERROR events, counting copies, and one
+  flagged uncaught exception. No ERROR event, no uncaught exception, and no stack trace is without a flag.
+- No container met either new path: none set a snapshot aside and none refused to recover. The Docker
+  tests wait for first snapshots before they kill a server, so that is as intended. Both paths ran in the
+  default build's tests, which place the kill exactly.
+
+Builds 12, 13, 16, and 17 belong to the lock described under "Suites and results" and are not recorded
+here.
+
+[Build 14](http://192.168.137.32:8080/job/Qraft/14/), of the same day on commit `0f6c497`, failed in
+its Docker stage. It is the first run of `DockerStartCommandsTest`, which runs every start command of
+`docker/` with the shell scripts, and six of its seven tests failed.
+- Default build: 925 tests, every coverage gate met. End-to-end: 10. Docker and slow: 26 passed and 6
+  failed. Jenkins published 967 results.
+- Five tests failed because `start.sh` and `start-quick.sh` called `build-runtime.sh` as a program, and
+  the file is not executable in the repository: "Permission denied". The scripts could not start
+  anything on Linux. They now run it with `sh`.
+- One test failed on an error line that Tempo logs once when its first span arrives, before it recovers.
+  The test now accepts exactly that line, and only with the recovery line after it.
+- Outside the new class, the 121 archived log files hold no ERROR event, uncaught exception, or stack
+  trace without a flag.
+
+[Build 15](http://192.168.137.32:8080/job/Qraft/15/), of the same day on commit `da87cb3`, passed with
+both fixes. It took 10 minutes 14 seconds.
+- Default build: 925 tests, every coverage gate met. End-to-end: 10. Docker and slow: 32, the 7 of
+  `DockerStartCommandsTest` among them.
+- Jenkins published 967 results, none failed or skipped.
+- The 140 archived log files hold 381 flagged ERROR events, counting copies. No ERROR event and no
+  uncaught exception is without a flag. The observability containers logged the one Tempo line and no
+  other error line.
+
+[Build 18](http://192.168.137.32:8080/job/Qraft/18/), of 2026-10-11 on commit `fac3696`, failed in its
+default stage. It is the first build against `raftlog-core` 1.5.0, which it downloaded and compiled
+against. 924 tests passed and 1 failed, and Jenkins skipped the two later stages.
+- `GrpcRaftServerTest#requestVoteWithAnAlreadyExpiredDeadlineFailsWithDeadlineExceeded` logged Netty's
+  warning "Failed to initialize a channel" with a stack trace and no flag. The test's one call fails
+  before it is sent but still starts a connection, and teardown stopped the server while the server
+  was accepting it. The test now connects before it calls.
+- The 25 archived log files hold 279 flagged ERROR events and no ERROR event or uncaught exception
+  without a flag.
+
+[Build 19](http://192.168.137.32:8080/job/Qraft/19/), of the same day on commit `f9b3403`, passed. It
+holds the move to `raftlog-core` 1.5.0, that fix, and two tests that place a connection exactly in and
+after the instant a gRPC server stops. It took 10 minutes 34 seconds.
+- Default build: 927 tests, every coverage gate met. End-to-end: 10. Docker and slow: 32.
+- Jenkins published 969 results, none failed or skipped.
+- The 141 archived log files hold 377 flagged ERROR events, counting copies. No ERROR event and no
+  uncaught exception is without a flag. The gRPC warning that the new test causes is flagged.
+
+[Build 20](http://192.168.137.32:8080/job/Qraft/20/), of the same day on commit `3579736`, was started
+by the owner and passed: 969 results, none failed.
+
+[Build 21](http://192.168.137.32:8080/job/Qraft/21/), of the same day on commit `e3cf808`, passed. It is
+the ordinary build of the commit that added the PIT profile to the POM and the mutation stage to the
+pipeline: 927 default tests, 10 end-to-end, 32 Docker and slow, 969 results, none failed. Its 141
+archived log files hold 539 flagged ERROR events and no ERROR event or uncaught exception without a
+flag.
+
+Builds 22 to 24 were PIT runs, with the three suites skipped. PIT has been on ice since that evening
+([TESTING.md](../TESTING.md#mutation-testing-with-pit)).
+- [Build 22](http://192.168.137.32:8080/job/Qraft/22/), a dry run on `e3cf808`, failed in 22 seconds on
+  PIT's configuration: `withHistory` needs a history plugin that the open-source release does not
+  include. It was removed.
+- [Build 23](http://192.168.137.32:8080/job/Qraft/23/), a dry run on `03bea0f`, passed in 75 seconds:
+  1,187 mutants in three classes, and no ERROR event without a flag in its 25 log files.
+- [Build 24](http://192.168.137.32:8080/job/Qraft/24/), the full analysis of those 1,187 mutants, was
+  aborted after two hours with no report. PIT had ended 160 mutants that made a test hang, at a steady
+  one every 44 seconds, and the whole run would have taken days.
+
+[Build 25](http://192.168.137.32:8080/job/Qraft/25/), of 2026-10-12 on commit `a37a684`, passed in ten
+minutes. It verified the first slice of the replacement of the wrapper future types, in
+`RaftStorageFactory`: 933 default tests, 10 end-to-end, 32 Docker and slow, 975 results, none failed or
+skipped, and every coverage check met. The six new results are `CompletionsTest` and
+`RaftStorageFactoryTest`. Its 139 archived log files hold 531 flagged ERROR events, counting copies, and
+no ERROR event or uncaught exception without a flag.
+
+[Build 26](http://192.168.137.32:8080/job/Qraft/26/), of the same day on commit `9851987`, passed in ten
+minutes. It verified the rest of that replacement: the wrapper types `Future`, `Promise`, and
+`AsyncResult` are deleted, and production and test code use `CompletableFuture`. 931 default tests, 10
+end-to-end, 32 Docker and slow, 973 results, none failed or skipped, and every coverage check met. Its
+139 archived log files hold 378 flagged ERROR events, counting copies, and no ERROR event or uncaught
+exception without a flag.
+
+No build ran between 2026-10-04 and 2026-10-10. In that time the `agent` directive of the
+`Jenkinsfile` had been renamed by mistake, which Jenkins would have refused; it was restored in
+`ce5890d` before build 4.
+
+An assistant starts this job only when the user asks for that build (see
+[TESTING.md](../TESTING.md#run-builds-in-a-visible-terminal-through-tee-object)). It reads the token from
+`.env/jenkins-api-token.txt` and never writes its value anywhere.
+
+## Suites and results: the Docker stage beside PeeGeeQ, 2026-10-10
+
+The Docker stage's tests create and remove Docker networks, which changes the network interfaces of
+the host. A browser on the host cancels a page load when that happens. On 2026-10-10, builds 6 and 11
+ran beside PeeGeeQ builds 18 and 19, and 7 PeeGeeQ browser test attempts failed on a blank page within
+seconds of this stage's network changes. For some hours that day this stage held a Jenkins lock shared
+with the PeeGeeQ browser tests (builds 12 to 17). The lock is removed: the PeeGeeQ job now runs its
+browser tests in a container, which has its own network interfaces, and build 17 ran beside PeeGeeQ
+build 28 with no lost page load. A job that runs a browser directly on this node is still affected.
+
+## Phase 7 local verification, 2026-10-13
+
+The executor ownership, test-helper removal and fenced-node diagnostics changes
+are committed as `7a9108f`, `d876349` and `f737d6b`. Their final verification was
+local: 960 default tests with all coverage gates and 42 runtime tests passed,
+followed by the retained-log audit. These results are separate from Jenkins
+build 26 below, which verified the earlier future-wrapper removal at `9851987`.
+This document records no newer Jenkins run for the later commits; see
+`docs/TESTING.md`, "Phase 7 verification record, 2026-10-13", as committed in `cc3b171` for the local
+captures and [the task plan](task-list-single-pom-and-quorus-removal-2026-10-21.md#phase-7-replace-the-vertx-shaped-async-layer)
+for the detailed evidence. The pipeline commands and archival policy above
+continue to apply to these changes.
+
+## Readiness verified, 2026-10-17
+
+The existing job was checked on the live Jenkins server at the user's request.
+It is enabled, buildable and idle, loads `Jenkinsfile` from this repository's
+`main` branch, and has no recurring trigger. Jenkins's declarative pipeline
+validator accepted the current `Jenkinsfile`. No job or global server settings
+needed changing, and no build was started for this readiness check.
+
+The online Linux x64 built-in worker has the required `linux` label. Read-only
+tool checks under the Jenkins account confirmed cached SapMachine JDK 27+35,
+`javac` 27, Maven 3.9.16 using that JDK, Git 2.43.0, Bash, curl, Docker client
+and engine 29.1.3, and Docker Compose 2.40.3. The workspace is
+`/var/lib/jenkins/workspace/Qraft`; its existing JDK and Maven caches match the
+paths configured by the pipeline.
+
+To run a build, select **Build Now** on the job page. On this workstation, the
+existing local helper can also be run in the visible VS Code terminal:
+
+```powershell
+.\.env\qraft-jenkins-build.ps1
+```
+
+The helper reads the existing API token without printing it, starts the job
+with mutation testing off, follows its status, and retains its console and
+archived artifacts under `logs/jenkins/Qraft-<build>/`. The helper and token
+are local files, not part of the repository; the job page is available without
+that helper. Audit the retained Maven, application, subprocess and Docker logs
+under the project's logging policy before accepting a run.
+
+Jenkins checks out pushed `main`, not this workstation's working tree. At this
+check, GitHub `main` and local `HEAD` both pointed to `bef4637`; the uncommitted
+promotion-boundary tests and documentation edits were not published and would
+not be included in a Jenkins build.
+
+## Build 27 verification, 2026-10-17
+
+[Build 27](http://192.168.137.32:8080/job/Qraft/27/) ran at the user's request
+against pushed `main`, commit `bef4637`, and succeeded in 10 minutes 12 seconds.
+The default suite passed 1,024 tests and every coverage gate; end-to-end passed
+10 tests; Docker passed 32 tests on the newly built jar and rebuilt image.
+Jenkins and the retained Surefire XML agree on 1,066 results, with zero failures,
+errors or skips. All 64 membership-parser cases passed. The two uncommitted
+promotion-boundary tests prepared on this workstation were not included.
+
+All 860 Jenkins artifacts were downloaded under `logs/jenkins/Qraft-27/archive/`,
+with the complete console retained beside that directory. The final audit
+reviewed 133 log files, 145 Surefire text reports and four JSON configuration
+documents. All 648 error headers and 480 exception headers were attributed,
+including one explicitly flagged lock-contender uncaught exception. Counts
+include duplicate captures. The flagged native Tempo WAL startup event had a
+later recovery with the same tenant, remote name and endpoint. No unflagged
+error, unattributed exception trace or ANSI escape remained. Candidate
+classification details and the file inventory are retained in
+`logs/jenkins/Qraft-27/log-audit.json`; suite totals, revision and artifact
+verification are in `logs/jenkins/Qraft-27/verification.json`.
+
+This verifies the committed parser slice and the source at `bef4637`. Membership
+runtime wiring, automatic cleanup and the uncommitted duration-boundary tests
+remain separate work.
+
+## Duration-boundary replay verification, 2026-10-19
+
+The duration-conversion work was tested without committing or pushing the
+working tree. Replays of build 27 checked out `bef4637`, verified that base
+revision, and applied an archived patch containing only production and test
+source changes. The normal job definition still loads the repository's
+`Jenkinsfile` from `main`; no recurring trigger was added. A later ordinary
+**Build Now** uses pushed source and will not include this patch until committed
+and published.
+
+- [Build 28](http://192.168.137.32:8080/job/Qraft/28/): 72 focused tests, one
+  promotion-overflow assertion failure and one timeout. Investigation found
+  the command helper could read the next log index before the leadership
+  no-op appended and acknowledge that no-op instead of the submitted command.
+  A state-loop barrier now drains the queued no-op before the index is read.
+  No timeout was increased and no error allowance was added.
+- [Build 29](http://192.168.137.32:8080/job/Qraft/29/): 74 focused tests, exactly
+  three RED assertions and zero test errors. They demonstrated promotion and
+  quorum-grace ceiling-division overflow, plus election-jitter overflow into a
+  negative scheduled delay. Production was unchanged for this run.
+- [Build 30](http://192.168.137.32:8080/job/Qraft/30/): successful in 11 minutes
+  25 seconds. Five consecutive focused runs passed 74 tests each, then the
+  default suite passed 1,028 tests and every coverage gate; end-to-end passed
+  10 and fresh-image Docker passed 32. The three full suites total 1,070 tests;
+  Jenkins publishes 1,440 results including the 370 focused repeat executions.
+  There were zero failures, errors or skips in this successful run.
+
+Build 30's verified source patch SHA-256 is
+`efd9946afd383132a141cb1ec4d7cad95a86145c83ad06c8d18a3c0aae10c33d`.
+The patch and individual source checksums are archived as
+`logs/verification-source.patch` and `logs/verification-source.sha256`.
+At completion of that slice, local source matched those checksums after CRLF normalization.
+The production change replaces the two overflow-prone ceiling divisions with
+`Math.ceilDiv` and limits election jitter to the available `long` headroom.
+
+All 892 artifacts are retained locally under `logs/jenkins/Qraft-30/archive/`,
+with console, test totals and the final audit beside that directory. The audit
+reviewed 143 log files, 155 Surefire text reports and four JSON configuration
+documents. All 645 error headers and 468 exception headers were attributed,
+including the explicitly flagged lock-contender uncaught exception. Counts
+include duplicate captures. The flagged native Tempo startup event had a later
+WAL recovery matching its tenant, remote name and endpoint. No unflagged error,
+unattributed trace or ANSI escape remained. Earlier failed captures are retained
+separately as diagnosed failure evidence, not included in the successful audit.
+
+Replay pipelines and source snapshots are retained in
+`logs/jenkins/membership-rounds-2026-10-19/`. This completes the timing slice;
+membership settings wiring and automatic failed-voter cleanup were still open
+at that checkpoint. The subsequent wiring slice is recorded below.
+
+## Membership-wiring replay verification, 2026-10-19
+
+The wiring slice was verified through a source-patch replay of build 27 on
+`bef4637`, including the earlier timing changes. No commit or push was made.
+
+- [Build 31](http://192.168.137.32:8080/job/Qraft/31/) established RED: 91 cases,
+  exactly seven missing-policy-log assertion failures, zero test errors, and
+  no unrelated application-log errors. The failed console, reports, source
+  snapshot and diagnosis are retained separately.
+- [Build 32](http://192.168.137.32:8080/job/Qraft/32/) succeeded in 11 minutes
+  22 seconds. Five consecutive focused runs passed 115 cases each. The default
+  suite passed 1,059 tests and every coverage gate; end-to-end passed 10 and
+  fresh-image Docker passed 32. The full suites total 1,101 executions;
+  Jenkins publishes 1,676 results including the 575 focused repeats. There
+  were zero failures, test errors or skips.
+
+The tested source patch SHA-256 is
+`23a70bff66e1e3a3abc9f1778447e389ea8b034a6237d23ea29897727403da54`.
+All seven production/test source files match the archived source checksums
+after CRLF normalization, including the two new policy files. The patch and
+manifest are archived under `logs/verification-source.*`. Replay pipelines,
+source snapshots and local verification helpers are retained in
+`logs/jenkins/membership-wiring-2026-10-19/`.
+
+All 916 artifacts are retained under `logs/jenkins/Qraft-32/archive/`, with
+the console, verification summary and final audit alongside it. The audit
+reviewed 141 textual log streams, including four JSON logs, 166 Surefire text
+reports and four JSON configuration documents. Two binary `raft.log` files
+are WAL data, not diagnostic streams. All 849 error headers, 518 exception
+headers and one uncaught-exception header were attributed. Counts include
+duplicate captures. The single native Tempo startup error in its original
+capture was explicitly flagged and followed by matching WAL recovery at
+line 56 after the error at line 52. No unflagged error, unattributed trace or
+ANSI escape remained.
+
+`QraftServerService` now passes all six values into the node's immutable
+`RaftMembershipPolicy`, and logs its effective values without the operator
+token. Promotion uses that policy. Seven real-server cases verify HTTP
+liveness, policy logging and WAL release after shutdown. Cleanup settings
+are retained, but startup explicitly reports `cleanup.active=false` until
+automatic removal is implemented. That is the next task; the overall Step 5
+exit gate remains open. The normal SCM job still reads `Jenkinsfile` from
+pushed `main`, so an ordinary **Build Now** does not include these uncommitted
+changes.
+
+## Lost-quorum recovery verification, 2026-10-24
+
+[Build 33](http://192.168.137.32:8080/job/Qraft/33/) built pushed `main` at
+`55fbb1c` with `MUTATION_TESTING=off` and succeeded in 718 seconds. The default
+suite passed 1,138 tests and every coverage gate, end-to-end passed 10 and
+fresh-image Docker passed 34, which includes the two scenarios of
+`DockerLostQuorumRecoveryTest` (recovery from current directories and from a
+backup). There were no failures, errors or skips.
+
+The retained archive is under `logs/jenkins/Qraft-33/`. Its `logs/` folder holds
+664 error headers, all flagged as intentional or injected, and no stack trace
+under an unflagged header at any level. The job needs the `MUTATION_TESTING`
+parameter, so a plain `POST /job/Qraft/build` answers 400; `.env/qraft-jenkins-build.ps1`
+starts it with `buildWithParameters`.
+
+## Builds 34 and 35, 2026-10-24
+
+[Build 34](http://192.168.137.32:8080/job/Qraft/34/) failed in 91 seconds on one
+default-suite test, the guard that a Docker test class which makes a peer
+unreachable also declares that its name may not resolve. The end-to-end and
+Docker stages were skipped. [Build 35](http://192.168.137.32:8080/job/Qraft/35/)
+ran every stage in 1,288 seconds: default 1,148 and end-to-end 10 passed, and
+Docker passed 38 of 40.
+
+One of the two Docker errors came from the host: the image build failed with
+"failed to prepare extraction snapshot ... parent snapshot ... does not exist:
+not found", and the next class built the same image a second later. No other job
+was running and the pipeline does not prune images, so the cause was not found;
+the fixture then tried that one failure once more. That retry was removed on
+2026-10-27 at the owner's direction: a lost snapshot points to a deeper fault, which
+must fail the build and be investigated rather than be retried away. Its unit test
+had also left two unflagged `#13 ERROR` lines in every default run since build 36.
+If the failure recurs, check the Docker daemon's version, storage driver and image
+store on the node.
+
+[Build 36](http://192.168.137.32:8080/job/Qraft/36/), on `3b3fe38`, passed every
+stage in 1,196 seconds: default 1,153, end-to-end 10 and Docker 40, with every
+coverage gate met. Its archived logs hold 631 error headers, all flagged, and no
+unflagged stack trace.
+
+[Build 37](http://192.168.137.32:8080/job/Qraft/37/), on `888892e`, failed in 1,156
+seconds. Default (1,153) and end-to-end (10) passed and all six Step 8 classes
+passed, but `DockerClientTopologyTest` failed its Docker-log audit on one
+undeclared error: a vote response refused while a stopped server's transition
+sequencer was draining. Handlers disagreed about such a refusal (six logged it at
+debug, five at error). One class now treats it the same everywhere: debug, and
+any other failure stays an error. No declaration excuses it any more.
+
+[Build 38](http://192.168.137.32:8080/job/Qraft/38/), on `adecfbc`, passed every stage
+in 1,178 seconds: default 1,164, end-to-end 10 and Docker 40, every coverage gate
+met, 675 error headers in the archived logs all flagged and no unflagged stack
+trace. It is the first green run after build 37.
+
+[Build 39](http://192.168.137.32:8080/job/Qraft/39/), on `ffdec45`, passed every stage
+in 1,199 seconds: default 1,164, end-to-end 10 and Docker 40, every coverage gate
+met, 643 error headers in the archived logs all flagged, no unflagged stack trace,
+and no error that mentions a draining sequencer. It is the first of the three
+consecutive green runs required on the final drain-handling code.
+
+[Build 42](http://192.168.137.32:8080/job/Qraft/42/), on `2dcb2ec`, the first run with
+Pre-Vote, failed on the Docker stage (default 1,189 and end-to-end 10 passed; Docker
+41 tests, 3 errors). Two Docker tests still proved a campaign by a rising term, and
+fixing them found a cut-off follower that kept reporting ready; the third was
+fallout from the first.
+
+Builds [43](http://192.168.137.32:8080/job/Qraft/43/),
+[44](http://192.168.137.32:8080/job/Qraft/44/) and
+[45](http://192.168.137.32:8080/job/Qraft/45/), all on `9c946ac`, are the three
+consecutive green runs of the Pre-Vote exit gate. Each passed every stage in about
+1,280 seconds: default 1,190, end-to-end 10 and Docker 41, every coverage gate met.
+Their archived logs hold 651, 627 and 722 ERROR lines; every one carries an
+intentional-error or injected-failure flag, no stack trace is unflagged, and no
+error mentions a draining sequencer.
+
+The follow-up that resets a peer's gRPC reconnect backoff when it sends a vote or
+pre-vote request (`RaftTransport.peerHeardFrom`, `7136209`) was verified by builds
+[46](http://192.168.137.32:8080/job/Qraft/46/),
+[49](http://192.168.137.32:8080/job/Qraft/49/) and
+[55](http://192.168.137.32:8080/job/Qraft/55/), all on `7136209`. Each passed every
+stage: default 1,196, end-to-end 10 and Docker 41, every coverage gate met. Their
+archived logs hold 705, 694 and 663 ERROR lines, all flagged; no stack trace is
+unflagged and none mentions a draining sequencer. `DockerReturningVoterTest`, which
+now stops a follower for 200 seconds and requires it ready within 15 seconds of
+answering, took 260 to 284 seconds.
+
+Builds 47, 48 and 50 to 54, on the same commit, are not results for the code. 47, 50,
+51, 52 and 53 failed before any test ran, in the checkout or the Jenkinsfile fetch
+(`git fetch` stalled or was reset by github.com). 48 and 54 passed the default and
+end-to-end suites and failed in the Docker stage only because the image build could
+not reach Docker Hub (a token read timeout in 48; a DNS lookup of
+`registry-1.docker.io` through the host's local stub in 54, which failed 7 tests).
+On the Jenkins host, 2 of 6 `git ls-remote` calls to github.com hung for 25 seconds
+and downloads from GitHub ran at 7 to 55 KB/s while Cloudflare ran at 16 MB/s; 1 of
+25 DNS lookups through the gateway (192.168.137.1) failed where none failed through
+1.1.1.1. The link itself showed no errors. The checks were clean again when build 55 ran on 2026-10-26, and the owner then
+fixed the Jenkins host's network (what was changed was not recorded). If it
+recurs, look at the gateway's DNS and its route to GitHub before suspecting the
+code.
+
+## Local run in place of Jenkins, 2026-10-27
+
+On the `markr` workstation no Jenkins could run the job: 192.168.137.32 did not
+answer, and the local `jenkins/jenkins:lts-jdk21` container has no Qraft job, no
+`linux` label, no Docker CLI and no `mvn` on its path. At the owner's direction the
+three suites ran locally instead, against Docker Desktop, with JDK 27 and Maven
+3.9.16, each through `Tee-Object` in a visible console and with the Jenkinsfile's
+commands. The one difference: the Docker stage passed `-Dgroups=docker,slow`,
+because `mvn.cmd` runs through `cmd.exe`, which reads a `|` as a pipe. Surefire
+reads the comma list as "any of", so the same classes ran.
+
+The first run, on `7a1ed98` (client list Phase 1), passed every suite (default
+1,210, end-to-end 10, Docker 41) but its audit found two unflagged `#13 ERROR`
+lines, from the image-build retry's unit test (see builds 34 and 35). The retry
+and that test were removed. The second run, on `7a1ed98` with that removal in the
+working tree, passed default 1,205 with every coverage gate met, end-to-end 10 and
+Docker 41 (24 min 36 s, the image built once on a fresh build), with no failures,
+errors or skips. Its 223 retained logs, including 19 Docker archive folders, hold
+823 ERROR lines, all flagged, 559 stack traces, none under an unflagged header,
+and no JVM crash file.
+
+The third run, with the client list's Phase 2 client slice in the working tree
+(later `6680a67`), passed default 1,221 and end-to-end 10 but failed two Docker
+classes, each a defect:
+
+- `DockerStartCommandsTest`: the start scripts ran `docker compose up -d` without
+  `--build`, so they started images left from an earlier build, whose client still
+  read `client.id`. The client never became ready, and its errors were unflagged.
+  Every start command now passes `--build` (`14ded7d`, test first,
+  `DockerDeploymentContractTest.everyStartCommandRebuildsItsImagesBeforeStartingThem`).
+- `DockerServerReplacementTest`: a check-quorum step-down moved leadership while
+  the leader was sending a snapshot to the old `server3`. The wiped server's answer
+  came from another server ID and was ignored, but the transfer was never ended,
+  and removing the old server did not forget it, so the leader never sent the new
+  `server3` anything for the rest of the term. Such an answer now ends the
+  transfer and backs off, and a server leaving the configuration takes its
+  snapshot transfer and backoff with it (`f991254`, test first,
+  `RaftNodeServerIdCountingTest` and `SnapshotRetryBackoffTest`). What starved
+  the leader of `server1`'s answers for the 1.5 seconds of check-quorum is not
+  explained: no Raft RPC has a deadline, so a stalled call logs nothing.
+
+The fourth run, on `14ded7d` with the snapshot fix in the working tree, passed
+default 1,225 with every coverage gate met, end-to-end 10 and Docker 41 (26 min
+5 s), with no failures, errors or skips. Its 234 retained logs hold 910 ERROR
+lines, all flagged, 588 stack traces, none under an unflagged header, and no JVM
+crash file. No leader stepped down, so the replacement test did not take the
+path the fix covers; the unit tests are its evidence.
+
+Where the Docker stage's time goes, from the fourth run's log: the classes run one
+at a time (`@ResourceLock("shared-docker-clusters")`, and no parallel execution is
+configured), and their times add up to the stage's (1,550 s of 1,565 s).
+
+| Part | Seconds |
+|---|---|
+| Five tests that wait for the cluster's timers: `DockerReturningVoterTest` (a follower stopped for 200 s, then a 40 s hold), `DockerPeriodicCleanupTest` (two 40 s absences, then the 60 s cleanup grace), `DockerLostQuorumRecoveryTest`, `DockerFailedVoterCleanupTest` (the 60 s grace) and `DockerRemovedServerCampaignTest` | 722 |
+| `DockerStartCommandsTest`, the real start scripts one after another, the longest being the observability cluster (63 s) and stack (43 s) | 300 |
+| Starting 23 compose clusters until ready (137 s) and removing them (44 s) | 181 |
+| The test bodies of the other ten classes | about 350 |
+
+Image builds take about 23 s of it (the fixture's one build, 7 s, and six cached
+builds from the start scripts' `--build`); container creation, server start
+(about 1 s) and server shutdown (under 0.3 s) are not where it goes. The four
+runs took 28 min 57 s, 24 min 36 s, 31 min 1 s (with the replacement test
+waiting out its limit) and 26 min 5 s. The records of builds 43 to 45 give whole
+pipelines of about 1,280 s, which looks short beside these figures for the same
+classes; without their stage times, the two cannot be compared.
+
+On 2026-10-28 two more runs, on `f991254`, verified deadlines on every Raft call
+(`GrpcRaftTransport`: 10 s for a vote, pre-vote or append, first 30 s for a
+snapshot chunk). Without one, a call on a connection that died without a reset never
+failed and logged nothing, and a snapshot chunk stuck that way kept its transfer
+in place, so the leader sent that follower no snapshot for the rest of the term.
+`GrpcRaftTransportTest` shows an unanswered call failing with
+`DEADLINE_EXCEEDED` at its deadline (red first), and each call's deadline
+counting from when it is sent.
+
+A check against Consul's Raft transport (`hashicorp/raft`, with Consul's
+`Timeout: 10 * time.Second`) then brought two changes, each red first. A snapshot
+chunk now gets Consul's deadline, 10 s for every whole 256 KiB and never less, so
+40 s for a full 1 MiB chunk. And where Consul closes a connection whose call failed,
+gRPC ends only the call and keeps sending later calls into a dead connection, so
+the transport's connections now use keepalive: a ping after 10 s without a read,
+gRPC's minimum, and the connection is closed when it is not answered within 10 s.
+`GrpcRaftServer` permits those pings every 5 s, with or without a call; gRPC's
+default would close the connections with `too_many_pings`. `GrpcRaftKeepaliveTest`
+(tagged `slow`) shows a connection that stops answering being closed and the peer
+reached on a new one, and an idle connection staying up through its pings.
+
+The first run passed default 1,228 and end-to-end 10 and failed three Docker
+classes, none on the deadlines. Each failure was traced to its cause:
+
+- `DockerLostQuorumRecoveryTest` logged `Failed to send InstallSnapshot chunk 1/1
+  to server1: UNAVAILABLE: io exception` three times. Its offline backup stops
+  server1, and the new leader had compacted its log past server1's next entry, so
+  it sent snapshots, which failed while server1 was stopped. The class now
+  declares `RAFT_SNAPSHOT_TRANSFER_INTERRUPTED`.
+- `DockerDurableRestartTest` logged Netty's `Stream Error` warning with
+  `Http2Exception$StreamException: Stream closed before write could take place`.
+  The leader-crash test kills the leader straight after a write, and a follower
+  was answering its AppendEntries when it died. A definition can now name the
+  exception an event carries (`DockerLogCaptureTest`, red first), and the new
+  `GRPC_ANSWER_TO_KILLED_PEER` accepts this warning only with that exception.
+- `DockerStartCommandsTest`: the five-server start brought server4 up 23 s
+  before Docker Desktop started server3's container, so server3's name did not
+  resolve meanwhile. The class now declares `RAFT_PEER_NAME_UNRESOLVED`. Its
+  cleanup, four Docker commands, ran past JUnit's 15 s default for a lifecycle
+  method and now has 5 minutes. It left nothing running.
+
+In the same run, a call from server3 to a server1 that the test had taken down ended
+with `DEADLINE_EXCEEDED` after 10 s on an open connection, which before would have
+waited forever without a log line.
+
+The second run passed default 1,231 with every coverage gate met, end-to-end 10
+and Docker 41 (26 min 43 s), with no failures, errors or skips. Its 233 retained
+logs hold 886 ERROR lines, all flagged, 580 stack traces, none under an unflagged
+header, and no JVM crash file. Only `DockerDurableRestartTest`, which kills and
+stops servers, had a call end at its deadline. None of the three newly declared
+races recurred, so `DockerLogCaptureTest` is the evidence for their definitions.
+
+Two runs then verified the Consul alignment. The first, on `06a5210` with the
+keepalive change in the working tree (later `ee11971`), passed default 1,232 and
+end-to-end 10 and failed `DockerDurableRestartTest` on one undeclared error:
+`Failed to send InstallSnapshot chunk 1/1 to server2: DEADLINE_EXCEEDED`. Its
+partition test cuts server2's network, and the new leader's snapshot to it waited
+for a connection until its deadline; the retry after the network was restored
+took 0.45 s. Before the deadlines that call would have waited until the partition
+healed. The class now declares the new `RAFT_SNAPSHOT_CHUNK_UNANSWERED`, which
+accepts only that message (`DockerLogCaptureTest`, red first); the stopped-peer
+definition does not excuse it.
+
+The second, on `ee11971` with that declaration in the working tree (later
+`bc19492`), passed
+default 1,233 with every coverage gate met, end-to-end 10 and Docker 43, the two
+`GrpcRaftKeepaliveTest` tests among them (28 min 24 s), with no failures, errors
+or skips. Its 232 retained logs hold 833 ERROR lines, all flagged, 566 stack
+traces, none under an unflagged header, no JVM crash file, and no
+`too_many_pings`.
+
+## Builds 56 to 63, 2026-10-30 to 2026-11-01
+
+Build 56 ran on `c33a2f2`, the first Jenkins build since build 55 on 2026-10-26.
+It is the first on Jenkins of the client list's Phases 1 to 3, the transport's
+deadlines and keepalive, and the client's anti-entropy. Jenkins answered from the
+`mraysmit` workstation, where the `markr` workstation could not reach it.
+
+It passed in 24 min 33 s: default 1,315 with every coverage gate met, end-to-end
+11, and Docker and `slow` 43, 1,369 in all, with no failures, errors or skips.
+
+The audit read the Jenkins console, 190 archived logs, 150 of them Docker archives
+from 16 classes, and the test reports. Many events appear in more than one of them.
+They hold 1,386 ERROR lines, all flagged, and 1,000 stack traces, none under an
+unflagged header. There is no `too_many_pings` and no JVM crash file.
+`DockerDeploymentContractTest` has no archive because it only reads files.
+
+Build 57 ran on `a2459ee`, with the client list's Phase 4. It passed in 24 min 14 s:
+default 1,375 with every coverage gate met, end-to-end 11, and Docker and `slow` 43,
+1,429 in all, with no failures, errors or skips. The same audit found 1,478 ERROR
+lines, all flagged, and 1,038 stack traces, none under an unflagged header, no
+`too_many_pings` and no JVM crash file. The new code's only warnings are from tests
+that cause them on purpose: a registration that cannot be kept, and a kept check
+whose service is gone. They carry no stack trace.
+
+Build 58 ran on `1a60239`, with the client list's Phase 5. It passed in 23 min 58 s:
+default 1,408 with every coverage gate met, end-to-end 11, and Docker and `slow` 43,
+1,462 in all, with no failures, errors or skips. The same audit found 1,286 ERROR
+lines, all flagged, and 975 stack traces, none under an unflagged header, no
+`too_many_pings` and no JVM crash file. The count of ERROR lines moves from build to
+build with timing. Against build 57 the archived logs hold fewer `RAFT_PEER_UNREACHABLE`
+(315 from 376), `RAFT_PEER_NAME_UNRESOLVED` (110 from 173) and
+`RAFT_SNAPSHOT_TRANSFER_INTERRUPTED` (44 from 62), which account for most of the drop.
+
+Build 59 ran on `8afd904`, with the client list's Phase 6. It passed in 23 min 58 s:
+default 1,426 with every coverage gate met, end-to-end 12, and Docker and `slow` 43,
+1,481 in all, with no failures, errors or skips. The same audit, over the console, 191
+archived logs, 150 of them Docker archives from 16 classes, and the test reports, found
+1,474 ERROR lines, all flagged, and 1,019 stack traces, none under an unflagged header,
+no `too_many_pings` and no JVM crash file. Against build 58 no new kind of error appears,
+and the rise is in the archived logs' `RAFT_PEER_UNREACHABLE` (358 from 315),
+`RAFT_PEER_NAME_UNRESOLVED` (194 from 110) and `RAFT_SNAPSHOT_TRANSFER_INTERRUPTED` (62
+from 44). The new code logs no error. A shutdown that could not deregister logs the
+existing `Client shutdown incomplete` warnings, without a stack trace.
+
+Build 60 ran on `01b44d4`, with the client list's Phase 6A. It passed in 24 min 17 s:
+default 1,429 with every coverage gate met, end-to-end 13, and Docker and `slow` 43,
+1,485 in all, with no failures, errors or skips. The same audit, over the console, 194
+archived logs, 150 of them Docker archives from 16 classes, and the test reports, found
+1,394 ERROR lines, all flagged, and 1,014 stack traces, none under an unflagged header,
+no `too_many_pings` and no JVM crash file. Against build 59 no new kind of error appears
+and none has gone. Only three differ, by timing, all down: `RAFT_PEER_UNREACHABLE` (608
+from 628), `RAFT_PEER_NAME_UNRESOLVED` (204 from 260) and
+`RAFT_SNAPSHOT_TRANSFER_INTERRUPTED` (84 from 88). These counts are across every retained
+file, where build 59's above are for the archived logs alone.
+
+Build 61 ran on `6a5c4e5`, with the client list's Phase 7. It passed in 24 min 23 s:
+default 1,446 with every coverage gate met, end-to-end 13, and Docker and `slow` 43,
+1,502 in all, with no failures, errors or skips. The same audit, over the console, 193
+archived logs, 150 of them Docker archives from 16 classes, and the test reports, found
+1,326 ERROR lines, all flagged, and 985 stack traces, none under an unflagged header,
+no `too_many_pings` and no JVM crash file. Against build 60 no new kind of error appears
+and none has gone. Only three differ, all down, counted across every retained file:
+`RAFT_PEER_UNREACHABLE` (604 from 608), `RAFT_PEER_NAME_UNRESOLVED` (168 from 204) and
+`RAFT_SNAPSHOT_TRANSFER_INTERRUPTED` (56 from 84).
+
+Build 62 ran on `a0a2cda`, with the client list's Phase 8, its last. It passed in 24 min
+28 s: default 1,450 with every coverage gate met, end-to-end 13, and Docker and `slow` 44,
+1,507 in all, with no failures, errors or skips. The same audit, over the console, 199
+archived logs, 156 of them Docker archives from 17 classes, and the test reports, found
+1,650 ERROR lines, all flagged, and 1,078 stack traces, none under an unflagged header,
+no `too_many_pings` and no JVM crash file. Against build 61 no new kind of error appears
+and none has gone. Three differ, all up, counted across every retained file:
+`RAFT_PEER_UNREACHABLE` (716 from 604), `RAFT_PEER_NAME_UNRESOLVED` (332 from 168) and
+`RAFT_SNAPSHOT_TRANSFER_INTERRUPTED` (104 from 56). The new leader change in
+`ClientEndToEndTest` accounts for 16 of the rise in the first. The new
+`DockerClientLocalApiTest` logged no error at all. The rest come from Docker classes that
+did not change, each line counted in several retained files, and their run times hardly
+moved: `DockerPeriodicCleanupTest` took 181.4 s in both builds, but two of its servers
+logged failed name lookups where one had. `DockerClientLocalApiTest` declared two errors
+on another class's evidence, and they were removed after this build because its run
+showed neither.
+
+Build 63 ran on `5bc7729`, whose only code change since build 62 removes those two
+declarations. It passed in 24 min 26 s: default 1,450 with every coverage gate met,
+end-to-end 13, and Docker and `slow` 44, 1,507 in all, with no failures, errors or skips.
+The same audit, over the console, 200 archived logs, 156 of them Docker archives from 17
+classes, and the test reports, found 1,558 ERROR lines, all flagged, and 1,061 stack traces,
+none under an unflagged header, no `too_many_pings` and no JVM crash file. Against build 62
+no new kind of error appears and none has gone. Only three differ, all down, counted across
+every retained file: `RAFT_PEER_UNREACHABLE` (700 from 716), `RAFT_PEER_NAME_UNRESOLVED`
+(264 from 332) and `RAFT_SNAPSHOT_TRANSFER_INTERRUPTED` (96 from 104).
+`DockerClientLocalApiTest` passed without its declarations and again logged no error.
+
+## Build 64, 2026-11-07
+
+Build 64 ran on `b33d594`, ACL Phase 4 with the owner's decisions of 2026-11-07, the first build
+since 63. It passed in 25 min 9 s: default 1,598 with every coverage gate met, end-to-end 13, and
+Docker and `slow` 44, 1,655 in all, with no failures, errors or skips. `DockerClientTopologyTest`,
+which timed out on the Pre-Vote deadlock in the local run of 2026-11-06, passed.
+
+The audit read the console, the archived logs (156 Docker archive files from 17 classes) and the
+test reports, matching error text in any case; JaCoCo's coverage pages were left out, since they are
+rendered source and hold every `LOG.error` call. It found 1,666 error lines, 1,638 flagged, and
+1,118 stack traces, 24 under an unflagged header; no `too_many_pings` and no JVM crash file. The
+unflagged lines had two causes, so the run was not accepted:
+
+- **Logback lost the end-to-end log** in `CrashedClientExpiryEndToEndTest`: eight `IO failure while
+  writing to file` status errors, each with its trace, once in the console, the log and the report.
+  The server's shutdown hook `health-expiry-stop` called `shutdownNow()` on the expiry thread while
+  it logged a node reap; the interrupt landed inside the prudent file appender's
+  `FileChannel.lock`, which closed the channel (`FileLockInterruptionException`, then
+  `ClosedChannelException` for every later write). Fixed by stopping the thread without an
+  interrupt (`server.health.ExpiryExecutor`). An earlier audit script missed these traces because
+  Jenkins's timestamp and Logback's doubled `at` hid the frames.
+- **Grafana's four `Database locked, sleeping then retrying` lines** in `DockerStartCommandsTest`,
+  with `GF_DATABASE_WAL=true` confirmed in effect. WAL did not help, and was removed; the lines are
+  now declared as `GRAFANA_SQLITE_LOCK_RETRY` ([TESTING.md](../TESTING.md)).
+
+The logs are in `logs/jenkins/Qraft-64/`.
+
+## Build 65, 2026-11-07
+
+Build 65 ran on `bb1101a`, with both fixes. It passed in 24 min 44 s: default 1,603 with every coverage
+gate met, end-to-end 13, and Docker and `slow` 44, 1,660 in all, with no failures, errors or skips.
+The same audit, over the console, the archived logs (156 Docker archive files from 17 classes) and the
+test reports, found 1,403 error lines and 1,048 stack traces. Every error line is flagged except one,
+the console's echo of the commit message, which contains the word; no stack trace is under an
+unflagged header; no `too_many_pings` and no JVM crash file. Logback reported no write failure.
+Grafana's lock retries appeared in the cluster start this time, three of them, each flagged
+`GRAFANA_SQLITE_LOCK_RETRY`. Against build 64 no new kind of error appears; `RAFT_OPERATOR_CHANGE_IN_PROGRESS`
+did not occur (its two removals did not meet), and the peer and snapshot counts moved with timing:
+`RAFT_PEER_UNREACHABLE` 596 from 700, `RAFT_PEER_NAME_UNRESOLVED` 180 from 312,
+`RAFT_SNAPSHOT_TRANSFER_INTERRUPTED` 84 from 92, counted across every retained copy. ACL Phase 4's
+exit is met on this build. The logs are in `logs/jenkins/Qraft-65/`.
+
+## Build 66, 2026-11-07
+
+Build 66 ran on `f833761`, ACL Phases 5 to 9. It passed in 24 min 46 s: default 1,684 with every coverage
+gate met, end-to-end 16, and Docker and `slow` 45, 1,745 in all, with no failures, errors or skips; the new
+`AclEndToEndTest` and `DockerAclTest` among them. The audit, over the console, the archived logs (18 Docker
+archive folders) and the test reports, found 1,619 error lines, 1,618 flagged, and 1,093 stack traces, none
+unflagged; no `too_many_pings` and no JVM crash file.
+
+The one unflagged line was the OpenTelemetry collector's, in `DockerStartCommandsTest`'s observability cluster
+start: `grpc: addrConn.createTransport failed to connect to {Addr: "tempo:4317"} ... Error while dialing ...
+connection refused`, at WARN. The collector started before Tempo listened; it reconnected, and spans flowed
+15 s later. Builds 64 and 65 did not meet it, so it was a startup race, not a known message. Fixed by starting
+the collector only once Tempo is healthy (`depends_on` with `service_healthy` in both observability compose
+files, pinned by `DockerDeploymentContractTest`). The Docker audit had not caught it: the collector writes
+tab-separated levels, and the error was text inside a WARN line. The logs are in `logs/jenkins/Qraft-66/`.
+
+## Local runs, 2026-11-07
+
+Two runs of the three suites from the copy at `C:\qx7`, against Docker Desktop, in place of Jenkins while the work
+was uncommitted.
+
+The first, on `f833761` with the collector's fix, passed default 1,685 with every coverage gate met and end-to-end
+16, and failed the Docker stage, 45 passed and one class-level failure: `DockerStartCommandsTest`'s audit met
+Tempo's `error tailing WAL ... failed to find segment for index`, the metrics generator's declared startup race
+(`TEMPO_METRICS_WAL_STARTUP`), without its recovery. The declaration holds only once the same remote logs
+`Done replaying WAL`. With the collector waiting for Tempo, the first span came after the audit and before the
+capture, so the archive ended 2 ms after the error. Its 18 unflagged lines were that line and the reports of it.
+Fixed by waiting, before the audit, until Tempo's span metrics are in Prometheus. The logs are in
+`logs/local-run-2026-11-07-acl-phases5-9/`.
+
+The final run, with that fix and the fix for a takeover under another case, passed default 1,686 with every
+coverage gate met, end-to-end 16 and Docker 45, with no failures, errors or skips. It met Tempo's race, and the
+audit found its recovery 20 s later and flagged it. The audit, over 452 files (the three consoles, the suites' logs
+and 18 Docker archive folders), found 1,340 error lines, all flagged, and 933 stack traces, none unflagged; no
+`too_many_pings` and no JVM crash file. The logs are in `logs/local-run-2026-11-07-final/`.
+
+## Local runs for transport security, 2026-11-07 and 08
+
+Two runs of the three suites from the copy at `C:\qx7`, against Docker Desktop, while the work was uncommitted. On
+Phase 2 of the transport security list: default 1,726 with every coverage gate met, end-to-end 16 and Docker 45; audit
+over 658 files clean (logs `logs/local-run-2026-11-07-tls-phase2/`). On the complete list, with `TlsEndToEndTest` and
+`DockerTlsTest`: default 1,743 with every coverage gate met, end-to-end 17 and Docker 46, with no failures, errors or skips; audit over 862 files: 2,414 error lines, all flagged, 1,678 stack traces, none unflagged; no `too_many_pings`; no JVM crash file (logs `logs/local-run-2026-11-07-tls-final/`).
+
+## Local runs for key/value, 2026-11-08
+
+Two runs of the three suites from the copy at `C:\qx7`, against Docker Desktop, while the work was uncommitted. After
+Phase 3 of the key/value list: default 1,772 with every coverage gate met, end-to-end and Docker 46; audit over 1,080
+files clean (logs `logs/local-run-2026-11-08-kv-phase3/`). On the complete list, with `KvEndToEndTest` and
+`DockerKvTest`: default 1,782 with every coverage gate met, end-to-end 18 and Docker 47, with no failures, errors or skips; audit over 1,293 files: 3,479 error lines, all flagged, 2,430 stack traces, none unflagged; no `too_many_pings`; no JVM crash file (logs `logs/local-run-2026-11-08-kv-final/`).
+
+## Local runs for consistency, 2026-11-08
+
+From the copy at `C:\qx7`, against Docker Desktop, while the work was uncommitted. The first final run failed its
+default suite on an older test that refused `?stale`, and was stopped before its Docker suite could share the copy
+with the rerun. The rerun, with that test updated: default 1,797 with every coverage gate met, end-to-end 19 and Docker 48, with no failures, errors or skips; audit over the 257 files the run wrote: 1,021 error lines, all flagged, 653 stack traces, none unflagged; no `too_many_pings`; no JVM crash file (logs `logs/local-run-2026-11-08-consistency-final2/`).
+
+## Local runs for sessions and locks, 2026-11-08
+
+From the copy at `C:\qx7`, against Docker Desktop, while the work was uncommitted. The first run, after Phase 3,
+failed its default suite on an older test that refused `session` as an ACL resource, and its end-to-end suite only
+because that install packaged no jar; it was stopped before its Docker suite. The final run, with that test updated and
+Phase 4's tests added: default 1,819 with every coverage gate met, end-to-end 20 and Docker 49, with no failures, errors or skips; audit over the 262 files the run wrote: 997 error lines, all flagged, 643 stack traces, none unflagged; no `too_many_pings`; no JVM crash file (logs `logs/sess4/`).
+
+## Local runs for tenancy, 2026-11-08
+
+From the copy at `C:\qx7`, against Docker Desktop, while the work was uncommitted. The first final run passed its
+default and end-to-end suites, and failed two Docker tests: one registered fillers in a scope it never created, and
+one met a follower refusing a write for a scope it had not yet applied, which is fixed. The rerun: default 1,839 with every coverage gate met, end-to-end 21 and Docker 50, with no failures, errors or skips; audit over the 264 files the run wrote: 926 error lines, all flagged, 612 stack traces, none unflagged; no `too_many_pings`; no JVM crash file
+(logs `logs/ten-final2/`).
+
+## Local runs for observability, 2026-11-08
+
+From the copy at `C:\qx7`, against Docker Desktop, while the work was uncommitted. Two attempts failed their default
+suite on `HttpApiServerRequestMetricsTest`, which found that the server's request metrics read a route the next
+request on the connection had taken over; each was stopped before its later suites. The run with the fix: default 1,851 with every coverage gate met, end-to-end 22 and Docker 51, with no failures, errors or skips; audit over the 212 files written since the previous attempt: 669 error lines, all flagged, 382 stack traces, none unflagged; no `too_many_pings`; no JVM crash file (logs `logs/obs-final3/`).
+
+## Local runs for events, 2026-11-08
+
+From the copy at `C:\qx7`, against Docker Desktop, while the work was uncommitted. The first run failed its default
+suite on `PackageDependencyTest`, as the new events package was outside the final layers; it moved under Common, and
+that run was stopped before its later suites. The rerun: default 1,867 with every coverage gate met, end-to-end 22 and Docker 51, with no failures, errors or skips; audit over the 275 files written since the previous attempt: 973 error lines, all flagged, 645 stack traces, none unflagged; no `too_many_pings`; no JVM crash file (logs `logs/ev-final2/`).
+
+## Local runs for authentication and audit, 2026-11-08
+
+From the copy at `C:\qx7`, against Docker Desktop, while the work was uncommitted. The default and end-to-end suites
+passed; the Docker suite was ended from outside at 16:57:52, when the runner's window closed and Maven's shutdown hook
+stopped its fork, with no test failed, and was run again alone: default 1,881 with every coverage gate met, end-to-end 23 and Docker 51, with no failures, errors or skips; audit over the 407 files written since the events list closed: 1,288 error lines, all flagged, 753 stack traces, none unflagged; no `too_many_pings`; no JVM crash file (logs `logs/auth-final/` and
+`logs/auth-final-docker/`).
+
+## Local runs for catalog indexes, 2026-11-08
+
+From the copy at `C:\qx7`, against Docker Desktop, while the work was uncommitted: default 1,883 with every coverage gate met, end-to-end 23 and Docker 51, with no failures, errors or skips; audit over the 275 files the run wrote: 949 error lines, all flagged, 636 stack traces, none unflagged; no `too_many_pings`; no JVM crash file (logs
+`logs/idx-final/`).
+
+## Local runs for event query and watch, 2026-11-08
+
+From the copy at `C:\qx7`, against Docker Desktop, while the work was uncommitted: default 1,890 with every coverage gate met, end-to-end 24 and Docker 51, with no failures, errors or skips; audit over the 272 files the run wrote: 818 error lines, all flagged, 590 stack traces, none unflagged; no `too_many_pings`; no JVM crash file (logs
+`logs/evq-final/`).
+
+## Local runs for the client library, the endpoint metric, certificate reloading, the kubernetes auth method and write forwarding, 2026-11-08
+
+From the copy at `C:\qx7`, against Docker Desktop, while the work was uncommitted, one run for the five lists:
+default 1,918 with every coverage gate met, end-to-end 28 and Docker 51, with no failures, errors or skips; audit over the 269 files the run wrote: 911 error lines, all flagged, 624 stack traces, none unflagged; no `too_many_pings`; no JVM crash file (logs `logs/five-final/`). An earlier run, `logs/trio-final/`, passed the default suite (1,905) and the end-to-end suite (26) on the client library, endpoint metric and certificate reloading work, and its Docker suite failed one class on its log audit: `DockerDurableRestartTest` kills the leader, and the new leader's snapshot to it failed five times with `UNAVAILABLE: Keepalive failed. The connection is likely gone`, a form the `RAFT_SNAPSHOT_TRANSFER_INTERRUPTED` declaration did not cover. The killed container's network went without resetting the connection, so the channel learned of it by its keepalive. The declaration now covers that form, with `DockerLogCaptureTest` seen red at it first.
+
+## Local runs for DNS discovery, 2026-11-09
+
+From the copy at `C:\qx7`, against Docker Desktop, on the sources the owner committed during the run as `4da64d8`: default 1,968 with every coverage gate met, end-to-end 29 and Docker 51, with no failures, errors or skips; audit over the 272 files the run wrote: 902 error lines, all flagged, 619 stack traces, none unflagged; no `too_many_pings`; no JVM crash file (logs `logs/dns-final/`).
+
+## Local runs, 2026-11-13
+
+The first run of the committed sources since build 66, in its place: Jenkins does not answer from the `markr` workstation. From a fresh clone of `653e2ce` at `C:\qx8`, against Docker Desktop, on mains power with no standby in any run. Another project's integration tests (`peegeeq`, with Testcontainers) ran on the same machine from 12:04. The logs are in `logs/local-run-2026-11-13-first/`, `-second-stopped/` and `-final/`.
+
+- **First, 11:01 to 11:37, on `653e2ce`:** default 1,968 with every coverage gate met and end-to-end 29, no failures, errors or skips; Docker and `slow` 51, with two failures. `DockerClientHealthTest` failed its log audit on an undeclared `Failed to send InstallSnapshot chunk 1/1 to server1: UNAVAILABLE: io exception`: its leader-loss test kills the leader, and the new leader sent the dead server a snapshot (Surefire counts the class's audit as a fifty-second test). `DockerClientTopologyTest.aClientKeepsPublishingWhileTheRunningLeaderIsCutOff` saw the client's checks expire: a renewal sent to a follower was forwarded to the cut-off leader and waited until the client's 3 s timeout, and the client's next server was the cut-off leader. Audit over 901 files: 1,215 error lines, 1,187 flagged, every other one the two failures and their reports; 884 stack traces, 7 unflagged, the same; no `too_many_pings`; no JVM crash file.
+- **Second, from 12:00, stopped:** the default suite failed `DnsServerTest`'s six tests with `DNS could not listen on 127.0.0.1:0: Address already in use`, so no jar was built, the end-to-end suite failed `RuntimeLoggingTest` for want of it, and the Docker stage was stopped.
+- **Final, 12:12 to 12:50, with the three fixes below:** default 1,972 with every coverage gate met and Docker and `slow` 51, no failures, errors or skips; end-to-end failed `AuthEndToEndTest`'s log audit on one unflagged `Raft peer server3 became unreachable during AppendEntries`, from its cleanup. Audit over 901 files: 1,328 error lines, 1,301 flagged, every other one that line and its reports; 920 stack traces, 6 unflagged, the same; no `too_many_pings`; no JVM crash file. **End-to-end again, 12:51 to 12:54, with the cleanup declared:** 29, no failures, errors or skips; audit over the 61 files it wrote: 30 error lines and 30 stack traces, all flagged.
+
+The fixes, each test first (handover, section 3): a follower answers a write it forwarded at once, 503 `outcome_unknown`, when it stops following that leader; `DnsServer` tries random ports for port 0, since Windows gives `bind(0)` ports in sequence and reserves runs of ports for UDP alone; `DockerClientHealthTest` declares `RAFT_SNAPSHOT_TRANSFER_INTERRUPTED`; and nine end-to-end classes declare each server their cleanup stops.
+
+## Build 67, 2026-11-13
+
+Build 67 ran on `4d5f6d5`, the first Jenkins run since build 66: it is the first to run transport security and
+every list after it, and the fixes of 2026-11-13, on a fresh image. Started from the `mraysmit` workstation at
+21:16 local time, it passed in 28 min 37 s: default 1,972 with every coverage gate met, end-to-end 29, and Docker
+and `slow` 51, 2,052 in all, with no failures, errors or skips. The audit, over the console, the archived logs
+(24 Docker archive folders) and the test reports, 871 files, found 1,702 error lines, all flagged, and 1,142
+stack traces, none unflagged; no `too_many_pings` and no JVM crash file.
+
+The audit's checker, written for this build, first reported six unflagged traces and 18 error lines (frames
+through `TransportContext.fatal`), all from `GrpcRaftTlsTest`. Each trace opens under a flagged event,
+`RAFT_PEER_UNREACHABLE` from `aServerWithACertificateFromAnotherCaTakesNoPart` or
+`aServerWhoseCertificateNamesAnotherHostIsNotReachedWhileTheHostIsChecked`, whose exception message runs to a
+second line, `Channel Pipeline: [SslHandler#0, ...]`. Jenkins puts its own timestamp on that line too, and the
+checker took it for a new event; it now looks for an event's start after Jenkins's prefix. The same checker gives
+build 66's recorded audit exactly. The logs are in `logs/jenkins/Qraft-67/`.
+
+## Build 68, 2026-11-14
+
+Build 68 ran on `bf945df`, the administrative interface's Steps 2 and 3 with the fixes of 2026-11-13: the first
+build of the interface's frontend on the Linux node. Started from the `mraysmit` workstation at 11:10 local time, it
+passed in 28 min 33 s: default 1,993 with every coverage gate met, end-to-end 29, and Docker and `slow` 51, 2,073 in
+all, with no failures, errors or skips; Vitest's 9 passed in each of the three Maven runs.
+
+The frontend build reached the network it needs. `frontend-maven-plugin` came from Maven Central; Node v24.22.3 was
+downloaded from nodejs.org into the job's Maven repository, `Qraft@repository`, in 2 s, so later builds find it
+there; and each `npm ci` added the lockfile's 228 packages from the npm registry in 3 s. The audit, over the console,
+the archived logs (24 Docker archive folders) and the test reports, 873 files, found 1,253 error lines, all flagged,
+and 882 stack traces, none unflagged; no `too_many_pings` and no JVM crash file. The logs are in
+`logs/jenkins/Qraft-68/`.
+
+## Build 69, 2026-11-14
+
+Build 69 ran on `75b133b`, the administrative interface's Step 4 (`7f3321d`) with its records: the first Jenkins run of
+the interface's views, its server-mode contract test, and the POM's removal of the previous bundle. Started from the
+`mraysmit` workstation at 12:03 local time, it passed in 29 min 50 s: default 1,997 with every coverage gate met,
+end-to-end 29, and Docker and `slow` 51, 2,077 in all, with no failures, errors or skips; Vitest's 49 passed in each
+of the three Maven runs. Node came from the job's Maven repository, where build 68 had put it, with no download, and
+each `npm ci` added 228 packages in 3 s. The audit, over the console, the archived logs (24 Docker archive folders)
+and the test reports, 877 files, found 1,262 error lines, all flagged, and 878 stack traces, none unflagged; no
+`too_many_pings` and no JVM crash file. The logs are in `logs/jenkins/Qraft-69/`.
+
+## Build 70, 2026-11-14
+
+Build 70 ran on `a3bacde`, the administrative interface's Step 5: the first Jenkins run of its packaged-artifact and
+container acceptance tests. Started from the `mraysmit` workstation at 13:07 local time, it passed in 30 min 41 s:
+default 1,997 with every coverage gate met, end-to-end 31, and Docker and `slow` 52, 2,080 in all, with no failures,
+errors or skips; Vitest's 49 passed in each of the three Maven runs. The interface's own classes passed in their
+stages: `AdminUiDataContractTest` (2) in the default suite, `PackagedAdminUiEndToEndTest` (2) in the end-to-end suite
+against the jar the default stage packaged, and `DockerAdminUiTest` (1) in the Docker suite. The audit, over the
+console, the archived logs (25 Docker archive folders) and the test reports, 895 files, found 1,289 error lines, all
+flagged, and 891 stack traces, none unflagged; no `too_many_pings` and no JVM crash file. The logs are in
+`logs/jenkins/Qraft-70/`.
+
+## Build 71, 2026-11-14
+
+Build 71 ran on `587a315`, the embedded interface list's close-out with Step 6's two fixes (`DnsResolver` bounding its
+reads with `Deadlines`, and the copyright line of `RaftMembershipPolicy` and its test). Started from the `mraysmit`
+workstation at 13:54 local time, it passed in 30 min 36 s: default 1,998 with every coverage gate met, end-to-end 31,
+and Docker and `slow` 52, 2,081 in all, with no failures, errors or skips; Vitest's 49 passed in each of the three
+Maven runs. `DnsResolverTest` (21, with the deadline thread's test) and `RaftMembershipPolicyTest` (22) passed. The
+audit, over the console, the archived logs (25 Docker archive folders) and the test reports, 894 files, found 1,253
+error lines, all flagged, and 882 stack traces, none unflagged; no `too_many_pings` and no JVM crash file. The logs
+are in `logs/jenkins/Qraft-71/`.
+
+## Build 72, 2026-11-14
+
+Build 72 ran on `3b6a706`, UI-2's Steps 1 to 4, started from the `mraysmit` workstation at 15:11 local time, and
+failed in the default stage after 3 min 22 s, so the end-to-end and Docker stages did not run. The Java suite passed,
+2,013 with every coverage gate met, among them the summary, listing and contract tests; Vitest failed one of its 70:
+`checks.test.tsx`, "filters by status, and by text over service, instance, node, check and output", timed out at
+Vitest's 5 s limit. It took 3.7 s on the workstation. Its five `getAllByRole('row')` and four other role queries
+computed every element's role, name and visibility over a page that holds Ant Design's styles; with a selector for
+the rows and label queries for the controls it takes 0.4 s. The per-view nonce test in `Root.test.tsx` took 4.8 s
+in this build; it is split into one test per view. Three more view tests over 2 s use text and label queries for the
+same elements. The audit, 581 files, found 849 error lines, 841 flagged; the 8 unflagged are that failure's report
+and Maven's lines after it. The logs are in `logs/jenkins/Qraft-72/`.
+
+## Build 73, 2026-11-14
+
+Build 73 ran on `3bf28b1`, the Vitest fix of build 72, started at 15:26 local time, and failed in the default stage
+after 2 min 47 s; the end-to-end and Docker stages did not run. Vitest's 73 passed, the Health Checks filter test
+among them. One Java test of 2,013 failed its log audit:
+`QraftServerWriteForwardingTest.aWriteForwardedToALeaderThisServerStopsFollowingIsAnsweredAtOnceAsPerhapsApplied`
+logged `RaftNode - Failed to retrieve vote from server2` (`UNAVAILABLE`), which no test declared. The test stops the
+leader, server3, and declares it; at 15:28:40.096 server1, without a leader, asked for votes, and at 40.102 the
+test's cleanup began stopping server2, which it had not declared. The cleanup now declares each server it stops, as
+the nine end-to-end classes' cleanups were made to on 2026-11-13; three more classes stopped three servers the same
+way, undeclared, and declare them too: `TenancyEndToEndTest`, `TlsEndToEndTest` and `WriteForwardingEndToEndTest`. The
+audit, 583 files, found 865 error lines and 744 stack traces; the 27 lines and 6 traces unflagged are that error,
+its report, and Maven's lines after it. The logs are in `logs/jenkins/Qraft-73/`.
+
+## Build 74, 2026-11-14
+
+Build 74 ran on `f550299`, UI-2 with the fixes of builds 72 and 73. Started from the `mraysmit` workstation at 15:35
+local time, it passed in 31 min 35 s: default 2,013 with every coverage gate met, end-to-end 31, and Docker and `slow`
+52, 2,096 in all, with no failures, errors or skips; Vitest's 73 passed in each of the three Maven runs. The services
+summary and check listing tests, the interface's contract, packaged-artifact and container tests, and the four classes
+whose cleanups now declare the servers they stop passed in their stages. The audit, over the console, the archived
+logs (25 Docker archive folders) and the test reports, 898 files, found 1,253 error lines, all flagged, and 877 stack
+traces, none unflagged; no `too_many_pings` and no JVM crash file. The logs are in `logs/jenkins/Qraft-74/`.
+
+## Build 75, 2026-11-14
+
+Build 75 ran on `4a3f019`, UI-3 and UI-2's open items, and failed in 31 min 28 s with every Java suite passing:
+default 2,026 with every coverage gate met, end-to-end 31, and Docker and `slow` 52. Vitest passed its 94 in the
+default and end-to-end stages and failed one in the Docker stage's run: `Root.test.tsx`, "gives every style inserted
+on Health Checks and in the open scope list the request nonce", timed out at 5 s after 5.6 s. It takes 2.5 s on the
+workstation with every file running together, and 0.5 s to 1.5 s for most tests alone; the node's four executors are
+shared with other jobs. Three changes, test first where they change behaviour: the frontend tests use no role query
+(selectors, text and labels instead); that test is two, the scope list opened on the lightest page; and the
+end-to-end and Docker stages pass `-DskipVitest=true`, the default stage having run the frontend tests already, the
+pom's `skipVitest` following `-DskipTests` (`BuildPipelineContractTest`, red first). The audit, 897 files, found 1,174
+error lines, 1,166 flagged; the 8 unflagged are that failure's report and Maven's lines after it; 852 stack traces,
+all flagged. The logs are in `logs/jenkins/Qraft-75/`.
+
+## Build 76, 2026-11-14
+
+Build 76 ran on `541ede3`, UI-3 with build 75's fixes. Started from the `mraysmit` workstation at 19:04 local time, it
+passed in 30 min 33 s: default 2,028 with every coverage gate met, end-to-end 31, and Docker and `slow` 52, 2,111 in
+all, with no failures, errors or skips. Vitest's 95 passed in the default stage, and did not run in the end-to-end and
+Docker stages (`-DskipVitest=true`). The audit, over the console, the archived logs (25 Docker archive folders) and the
+test reports, 907 files, found 1,175 error lines, all flagged, and 857 stack traces, none unflagged; no
+`too_many_pings` and no JVM crash file. The logs are in `logs/jenkins/Qraft-76/`.
+
+## Build 77, 2026-11-15
+
+Build 77 ran on `67ea3c4`, UI-4, and failed in 29 min 14 s on one end-to-end test, every other suite passing: default
+2,041 with every coverage gate met and Vitest 132, end-to-end 31 of 32, and Docker and `slow` 52.
+`SessionEndToEndTest.whenTheHoldersSessionLapsesTheOtherClientAcquiresTheLockAfterItsDelay` read the lock through
+host-a's client 13 ms after host-b's client had acquired it, and found no holder. The leader, server3, committed the
+acquire at index 485; host-a's client asked its first server, server1, a follower that then knew 484 as committed and
+answered its applied state, as a default read does (platform design section 12.5). The test, not the platform, was
+wrong: its three reads through one client of what the other wrote, the session's information and the lock twice, are
+now `?consistent`, which a follower refuses and the client takes to its next server, and the leader answers after a
+read barrier. It passed in the check copy. The audit, 908 files, found 1,723 error lines, 1,690 flagged, and 1,154 stack
+traces, 1,150 flagged; the unflagged are that failure's report and Maven's lines after it. No `too_many_pings` and no
+JVM crash file. The logs are in `logs/jenkins/Qraft-77/`.
+
+## Build 78, 2026-11-15
+
+Build 78 ran on `b108357`, build 77's fix, `SessionEndToEndTest`'s consistent reads, and passed in 30 min 17 s: default
+2,041 with every coverage gate met and Vitest 132, end-to-end 32, and Docker and `slow` 52. The audit, 908 files,
+found 1,650 error lines and 1,138 stack traces, every one flagged. No `too_many_pings` and no JVM crash file. The logs
+are in `logs/jenkins/Qraft-78/`.
+
+## Build 79, 2026-11-15
+
+Build 79 ran on `9b8b8a8`, UI-5's Phase 0, the security status read, and passed in 31 min 1 s: default 2,046 with
+every coverage gate met and Vitest 132, end-to-end 32, and Docker and `slow` 52. The audit, 912 files, found 1,714
+error lines and 1,147 stack traces, every one flagged. No `too_many_pings` and no JVM crash file. The logs are in
+`logs/jenkins/Qraft-79/`.
+
+## Build 80, 2026-11-15
+
+Build 80 ran on `851331c`, UI-5's Phases 1 to 3, and failed in 3 min 23 s in the default stage on one test,
+`QraftServerWriteForwardingTest.aFollowerAnswersAWriteWithTheLeadersAnswer`, which expected `leader_unavailable` from a
+follower whose leader and third server had been stopped and was answered `outcome_unknown`; the other 2,046 passed. The
+cause was in the server, not the test. The follower still named the stopped leader, so it forwarded the write; while the
+forward waited for its connection, the follower stopped following that leader, and `HttpApiServer` answered every
+forward not yet done as perhaps applied, though this one had never been sent (its log: "was not answered before this
+server stopped following it"). A forward is now a `raft.ForwardCall`, either sent or withdrawn, never both: the
+transport sends it only if it was not withdrawn first, and the follower withdraws it on leaving the leader, answering
+`leader_unavailable` when it was never sent. `ForwardCallTest` (3), `GrpcRaftForwardTest` (1 new) and
+`QraftServerWriteForwardingTest` (1 new) were red first, the last on `outcome_unknown` against the old server. The audit
+of the build's files found no unflagged line but the failure's report and Maven's lines after it. The logs are in
+`logs/jenkins/Qraft-80/`.
+
+## Build 81, 2026-11-15
+
+Build 81 ran on `be77ac8`, UI-5's close with build 80's fix and the test logging no longer prudent, and failed in 2 min
+51 s in the default stage on one test, `RaftNodeServerHealthTest.aFollowerCutOffForAnElectionTimeoutIsUnhealthyAndLowersTheFailureTolerance`,
+the other 2,052 passing. The partition held, every append to h3 refused, but the leader judged h3's health by the wall
+clock, healthy until 10 s silent, the fixture's election timeout, while the fixture's `heartbeatUntil` waits at most
+10 s: the test raced two equal clocks, and lost by 40 ms. The health is now counted in heartbeat rounds, an election
+timeout's worth, as the members read's reachability and check-quorum count it; the test drives that many rounds, red
+first on the wall-clock rule, and takes 1.2 s instead of over 10. The audit found no unflagged line but the failure's
+report and Maven's lines after it. The logs are in `logs/jenkins/Qraft-81/`.
+
+## Build 82, 2026-11-15
+
+Build 82 ran on `0d2b53b`, build 81's fix with UI-5's close, and passed in 30 min 20 s: default 2,053 with every
+coverage gate met and Vitest 220, end-to-end 33, and Docker and `slow` 52. The audit, 912 files, found 1,702 error
+lines and 1,160 stack traces, every one flagged. No `too_many_pings` and no JVM crash file. Two Vitest tests took 3.8 s
+and 3.6 s, against the 5 s limit: the explanation test, which opened a service and Nodes and Clients, is split in two,
+and the management-banner test moves to the Access page, which has no table, instead of Configuration. The logs are in
+`logs/jenkins/Qraft-82/`.
+
+## Build 83, 2026-11-15
+
+Build 83 ran on `1a4ca7d`, build 82's record with the two Vitest tests lightened, and failed in 3 min 27 s in the
+default stage on one Vitest test, `security.test.tsx` "lists the client rows of Nodes and Clients without
+operator:read, and says the server rows need it": its first wait, Testing Library's 1 s, ended at 1,171 ms before
+the clients table showed, the other 220 Vitest tests and the 2,053 Java tests passing. Build 82 had run it in 825 ms.
+Measured in the check copy, the cost was not the table but jsdom's `getComputedStyle`, which rc-util's scrollbar
+measurement calls as a table mounts and which evaluates every rule of every style element in the page: Ant Design
+leaves its style elements after its components unmount, so they gathered through a file, and the explanation test on
+Nodes and Clients spent 795 ms of its 879 in four calls over 298,000 characters of CSS, 3.7 s on Jenkins. Each test
+now starts with no style element (`setupTests.ts`), the explanation test taking 403 ms under the whole local suite
+instead of 1,484, and the suite's test time 50.7 s instead of 64.8; and every wait lasts up to 3 s, the first one
+spanning the whole interface mounting, as the Root first-table test's already did. `testSetup.test.tsx` (4) holds both
+rules, each red first. The audit, 600 files, found no unflagged line but Maven's and Jenkins' report of the failure, and
+1,004 stack traces, every one flagged; no `too_many_pings` and no JVM crash file. The logs are in
+`logs/jenkins/Qraft-83/`.
+
+## Build 84, 2026-11-15
+
+Build 84 ran on `f45bf2a`, build 83's fix with the key filter of UI-6's Key/Value list, and passed in 30 min 41 s:
+default 2,055 with every coverage gate met and Vitest 225, end-to-end 33, and Docker and `slow` 52. The audit, 912
+files, found 1,634 error lines and 1,159 stack traces, every one flagged. No `too_many_pings` and no JVM crash file.
+Vitest's test time was 93 s, 128 s in build 83; the explanation test on Nodes and Clients took 901 ms instead of
+3,706, and the client-rows test that failed build 83 took 1,003 ms, inside its 3 s wait. The logs are in
+`logs/jenkins/Qraft-84/`.
+
+## Local runs for UI-6's Sessions, Locks and Watches, 2026-11-17
+
+Jenkins does not answer from the `markr` workstation, so the three suites ran in its place. They ran from the clone at
+`C:\qx8`, refreshed to `a12393d` with the list's uncommitted work copied over it, against Docker Desktop. The machine was
+on mains power, with no standby event in any run. The logs are in `logs/local-run-2026-11-17-slw/`.
+
+- **`mvn clean install`, 17:15:** default 2,070 with every coverage gate met, and Vitest 329, no failures, errors or
+  skips. The audit read the 614 files the run wrote: 859 error lines and 792 stack traces, all flagged.
+- **End-to-end, 17:25:** 35 tests, no failures, errors or skips. The audit read 63 files: 18 error lines and 18 stack
+  traces, all flagged.
+- **Docker and `slow`, 17:31 to 18:09:** 52 tests in 38 min 20 s, no failures, errors or skips. The audit read 282
+  files, the 25 Docker archive folders included: 382 error lines and 123 stack traces, all flagged. There was no
+  `too_many_pings` and no JVM crash file.
+
+The audit's checker is a Perl script, written afresh to the handover's rules (section 5, "Auditing a run"). It was
+shown to catch an unflagged error line and an unflagged trace at WARN in a planted file.
+
+## Local runs for UI-6's Tenants, Namespaces and Audit, 2026-11-18
+
+Jenkins does not answer from the `markr` workstation, so the three suites ran in its place. They ran from a fresh clone
+at `C:\qx9` of `5aab391`, with the list's uncommitted work copied over it, against Docker Desktop. The machine was on
+mains power, with no standby event from 11:00 to 16:20. The logs are in `logs/local-run-2026-11-18-gov/`.
+
+- **`mvn clean install`, 11:44 to 11:52:** default 2,078 with every coverage gate met, and Vitest 373, no failures,
+  errors or skips.
+- **End-to-end, 11:52 to 11:58:** 36 tests, no failures, errors or skips.
+- **Docker and `slow`, 11:58 to 12:31:** 52 tests in 33 min 26 s, no failures, errors or skips. The stage still exited
+  1. The runner had left out the `-DskipVitest=true` the Jenkinsfile gives the end-to-end and Docker stages, so Vitest
+  ran again after each. After the end-to-end tests it passed 373. After the Docker tests two tests ran past Vitest's
+  15 s limit: the first of `configuration.test.tsx` and the first of `checks.test.tsx`, about 3 s each in install. The
+  whole run was slow, not those two: unrelated files took four to seven times as long as in install, and collection
+  384 s against 283 s, so the machine was short of CPU. Vitest alone at 13:16, twice, while other projects' tests ran
+  on the machine (CPU 85 to 97%, a kind cluster and Testcontainers), failed the first of `Root.test.tsx` each time, on
+  its 3 s wait for the first table. Vitest alone at 16:10, twice, once no other project's test JVM or container had run
+  for three minutes, passed 373 each. The runner now passes the flag.
+
+An earlier run, 11:09 to 11:22, before the back/forward cache fix (UI/UX design, section 12), passed install (2,078,
+and Vitest 369) and end-to-end (36).
+
+The audit read the 1,509 files the day's runs wrote, the 25 Docker archive folders included: 2,178 error lines and
+1,671 stack traces. Every one was flagged but nine lines, the Docker stage's Vitest timeouts and Maven's report of
+them. There was no `too_many_pings` and no JVM crash file. The audit's checker is a Node script, calibrated on the
+2026-11-17 runs' logs, which it found clean, and on that list's red runs, whose unflagged lines and traces it caught.
+
+## Local runs on `e954c89` and the Docker image build's time limit, 2026-11-19
+
+Jenkins does not answer from the `markr` workstation, so the three suites ran in its place, the first run of UI-6's
+second and third lists as committed. Both runs were made against Docker Desktop, on mains power, with no standby event
+from 10:55 to 12:40. A `korus-qualification` kind cluster ran beside them.
+
+**On `e954c89`**, from the clone at `C:\qx9` (logs `logs/local-run-2026-11-19-gov4/`):
+
+- **`mvn clean install`, 10:58 to 11:06:** default 2,078 with every coverage gate met, and Vitest 374, no failures,
+  errors or skips.
+- **End-to-end, 11:06 to 11:11:** 36 tests, no failures, errors or skips; Vitest skipped.
+- **Docker and `slow`, 11:11 to 11:45:** 52 tests, one error: `DockerAclTest` timed out at its 90 s limit. The runtime
+  image was built inside it, in the first call to start a cluster, and Docker's build cache had lost the base image:
+  `docker buildx history` shows the build at 0% cached, 53.6 s pulling `sapmachine:27-jre-alpine` and 7.1 s for
+  `apk add`, 73 s in all, where the builds of 2026-11-17 and 18 took 8 to 10 s and those after them 0.9 s. The test's
+  own work, from the servers' first line to its last assertion, took 14 s. `DockerAclTest` runs first in every run, so
+  it always held the build; it passed before because the build was quick.
+
+The audit read 960 files, the 25 Docker archive folders included: 1,383 error lines, of which 19 unflagged, and 933
+stack traces, of which 3 unflagged, all of them the timeout and Maven's report of it; no JVM crash file.
+
+**The fix**, test first (`DockerImageBuildTest`, `DockerImageExtensionHelperTest`, four of five red on stubs):
+`DockerImageExtensionHelper`, registered after `DockerLogExtensionHelper`, builds the image before the tests of every
+class tagged `docker`, in a class callback that JUnit's `@Timeout` does not bound. `DockerImageBuild` keeps a failed
+build and gives it to every later class as its cause; before it, a failed build left the fixture's flag unset, so the
+next class built again, against the rule that a failed build is never retried (design, section 19.6; `docs/TESTING.md`).
+
+**With the fix**, from a fresh clone at `C:\qx10` of `e954c89` with the fix copied over it (logs
+`logs/local-run-2026-11-19-img/`, which hold the red and green runs too):
+
+- **`mvn clean install`, 11:52 to 11:59:** default 2,083 with every coverage gate met, and Vitest 374, no failures,
+  errors or skips.
+- **End-to-end, 11:59 to 12:04:** 36 tests, no failures, errors or skips; Vitest skipped.
+- **Docker and `slow`, 12:04 to 12:36:** 52 tests in 32 min 33 s, no failures, errors or skips. `DockerAclTest` took
+  28.8 s, of which its test method 18.9 s: the build ran before the method.
+
+The audit read 960 files, the 25 Docker archive folders included: 1,268 error lines, all flagged, and 897 stack
+traces, none unflagged; no JVM crash file.
+
+## Build 85, 2026-11-20
+
+Build 85 ran on `000c02a`, the Docker image build's fix of 2026-11-19 with its records, the first Jenkins run of
+UI-6's second and third lists, and failed in 32 min 5 s. The default stage passed, 2,083 with every coverage gate met
+and Vitest 374, and the Docker and `slow` stage passed 52, no failures, errors or skips. The end-to-end stage failed one
+of its 36 tests, and Jenkins failed the Docker stage's post step. The logs are in `logs/jenkins/Qraft-85/`.
+
+- **`KubernetesAuthEndToEndTest`** failed in 0.08 s: server2's API gRPC server could not bind port 35461,
+  `Address already in use`. The test chose each of its nine ports with a `freePort()` that bound port 0 and closed
+  the socket, so nothing kept the kernel from offering a port again: 35461 went first to server1's Raft port, which
+  server1 had bound at 13:15:04.828, and then to server2's API gRPC port. Fourteen more test classes had the same
+  helper, and `HealthPropagationEndToEndTest` held its sockets together, distinct within one call but not against
+  other classes. Fixed test first (two of three new tests red on a stub; the third, 200 system ports all distinct,
+  guards against a regression): `dev.mars.qraft.testing.TestPorts.freePort()` never gives out a port twice in a JVM,
+  and every one of those classes uses it. A port another process takes between the choice and the bind is not covered;
+  only a server that binds port 0 itself would be.
+- **The Docker stage's post step** did not start: the Jenkins JVM's `ProcessBuilder` failed with `Failed to exec spawn
+  helper ... Cannot run program "nohup"`, naming a JDK version mismatch among the possible reasons. The stage's own
+  `sh` step had started at 05:16 UTC and the post step failed at 05:43, so the controller's JDK, Ubuntu's
+  `21.0.13.0.3+1-1-24.04.1`, was most likely upgraded under the running Jenkins. The Docker stage's surefire reports
+  were not copied to `reports/docker`, so the job's test report counts only the default and end-to-end stages, 2,119;
+  its console, its log and its 25 Docker archive folders were archived. A restart of Jenkins on the host is the cure,
+  and the owner's to make.
+- **The audit**, over the console, the archived logs and the test reports, 871 files, found 1,767 error lines and
+  1,191 stack traces. Every one is flagged but the two causes above: the end-to-end failure and Maven's summary of it,
+  and Jenkins's own trace of the spawn failure. No `too_many_pings` and no JVM crash file. A simple checker meets 24
+  traces under `Channel Pipeline:`, the second line of gRPC's exception message, each two lines below a flagged
+  `RAFT_PEER_UNREACHABLE` from `GrpcRaftTlsTest`.
+
+The fix was run locally on 2026-11-20 from `C:\qx11`, a fresh clone of the workspace at `000c02a` with the fix copied
+over it, since the workspace's `src/main/ui/node_modules` was held open (`npm ci` failed with `EPERM`): `mvn clean
+install` 2,086 and Vitest 374, every coverage gate; end-to-end 36, `KubernetesAuthEndToEndTest` included; no
+failures, errors or skips. The audit, 678 files, found 817 error lines and 771 stack traces, all flagged, and no JVM
+crash file. The Docker stage was not run again: it passed in build 85, and the fix changes no class it runs.
+
+## Build 86, 2026-11-20
+
+Build 86 ran on `8297836`, the shared port helper of 2026-11-20 with build 85's record, after Jenkins was restarted
+on the host onto the upgraded Java, `21.0.13.1+2-1-24.04.1-Ubuntu`. It passed in about 33 minutes: default 2,086 with
+every coverage gate met and Vitest 374, end-to-end 36, and Docker and `slow` 52, no failures, errors or skips; the job's
+test report counts all three stages, 2,174. The audit, over the console, the archived logs (25 Docker archive folders)
+and the test reports, 935 files, found 1,598 error lines and 1,151 stack traces, every one flagged; the 24 traces under
+`Channel Pipeline:` are each two lines below a flagged `RAFT_PEER_UNREACHABLE` from `GrpcRaftTlsTest`. No
+`too_many_pings` and no JVM crash file. The logs are in `logs/jenkins/Qraft-86/`.
+
+## Local runs for the open items, 2026-11-20
+
+The open-items list ([`task-list-open-items-2026-11-20.md`](task-list-open-items-2026-11-20.md)) ran from
+`C:\qx11`, a clone of the workspace at `8297836` with the list's files copied over it, on the `mraysmit` workstation,
+a desktop on mains power. The workspace's `src/main/ui/node_modules` was held open by another process, so `npm ci`
+could not run there (`EPERM`). Each phase closed with `mvn clean install`, and each that changed the runtime with the
+end-to-end stage; the Docker and `slow` stage ran once, over Phases 2 to 4, which change the client and the server.
+
+| Run | Default | Vitest | End-to-end | Docker and `slow` |
+|---|---|---|---|---|
+| Phase 1, hidden tabs | 2,086, every coverage gate | 379 | | |
+| Phase 2, retried requests | 2,088, every coverage gate | 379 | 36 | |
+| Phases 3 and 4, a renewal's margin and audit rotation | 2,094, every coverage gate | 379 | 36 | 52 (26 min 23 s), 25 Docker archive folders |
+
+No run had a failure, error or skip. Every audit, over the Maven output, the logs the run wrote and the test reports,
+found every error line and stack trace flagged; a simple checker meets six traces under `Channel Pipeline:` in each
+console log, the second line of gRPC's exception message, each below a flagged `RAFT_PEER_UNREACHABLE` from
+`GrpcRaftTlsTest`. Phase 2's end-to-end log holds 779 of the client's new INFO lines for a request sent to the next
+server or taken by none: 408 from one test whose server answers `held_by_test` while the publisher retries, the rest
+heartbeats and lookups around the tests' stopped servers and lost leaders. The logs are in `C:\qx11\logs\p*-*.log`.
+
+## Build 87, 2026-11-20
+
+Build 87 ran on `1143f27`, the open items' work of 2026-11-20 ([`task-list-open-items-2026-11-20.md`](task-list-open-items-2026-11-20.md)):
+hidden tabs releasing their long reads, the client's lines for retried requests, renewals bounded by the time left,
+and the audit file's rotation. It passed in 30 min 23 s: default 2,094 with every coverage gate met and Vitest 379,
+end-to-end 36, and Docker and `slow` 52, no failures, errors or skips; the job's test report counts 2,182. The audit,
+over the console, the archived logs (25 Docker archive folders) and the test reports, 929 files, found 1,690 error
+lines and 1,175 stack traces, every one flagged; the 24 under `Channel Pipeline:` are each two lines below a flagged
+`RAFT_PEER_UNREACHABLE` from `GrpcRaftTlsTest`. No `too_many_pings` and no JVM crash file. A leader stepped down by
+check-quorum only in `DockerClientTopologyTest`, `DockerDurableRestartTest` and `DockerRunningPartitionTest`, which cut
+one off on purpose, as in every build since 64. The logs are in `logs/jenkins/Qraft-87/`.
