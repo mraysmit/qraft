@@ -4,7 +4,7 @@
 **Status:** Complete and archived on 2026-11-14. Phases 0 to 3 are done, test first; the code was committed by the owner in `de1fa54` and `4a3f019`, and the three suites ran locally on `4a3f019` from the check copy: default 2,026 with every coverage gate met and Vitest 94, end-to-end 31, and Docker and `slow` 52, with no failures, errors or skips; every log audited, none unflagged (section 8).
 **Last updated:** 2026-11-14 (Phase 3 done, the list complete and archived, its links rewritten from its new place. Earlier the same day: Phases 0 to 2 built, test first, with their records; decision 7 corrected to the test the code makes. Earlier the same day: written, at the owner's word to close the open items and complete UI-3 without pausing)
 **Active work:** complete on 2026-11-14
-**Implementation plan:** [`QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md`](../../docs-design/QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md), increment UI-3
+**Implementation plan:** [`QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md`](QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md), increment UI-3
 **Source plan:** [`QRAFT_ADMIN_UI_UX_DESIGN.md`](../../docs-design/QRAFT_ADMIN_UI_UX_DESIGN.md), sections 4.2, 5.2, 9.1 to 9.3; [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](../../docs-design/QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), sections 12.4.1 and 12.5
 **Predecessor:** [`task-list-admin-ui-scoped-discovery-2026-11-14.md`](task-list-admin-ui-scoped-discovery-2026-11-14.md) (UI-2)
 **Standards:** [`PROJECT_STANDARDS.md`](../PROJECT_STANDARDS.md)
