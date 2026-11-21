@@ -548,6 +548,11 @@ public final class HttpCatalogClient implements CatalogClient, ObservationClient
                     endpoints.markSuccessful(endpoint);
                     contactTracker.recordSuccessfulContact();
                 }
+                // A write sent and never answered may have been applied: it is answered as the server answers such
+                // a write, never as no answer at all, which the local API would offer for retry (code defects list).
+                if (response.isEmpty() && !read) {
+                    return CompletableFuture.completedFuture(Optional.of(unknownOutcome(requestId, endpoint)));
+                }
                 return CompletableFuture.completedFuture(response.isPresent() ? response : lastAnswer);
             }
             Optional<ForwardedResponse> latest = response.isPresent() ? response : lastAnswer;
@@ -559,6 +564,25 @@ public final class HttpCatalogClient implements CatalogClient, ObservationClient
             logPassedOver(what, endpoint, attempt.answer(), cycle.get(index + 1));
             return forwardAttempt(cycle, index + 1, method, pathAndQuery, body, requestId, headers, latest);
         });
+    }
+
+    /**
+     * The server's answer to a write whose outcome is unknown, 503 {@code outcome_unknown} in the error envelope, for a
+     * write this client sent to {@code server} and had no answer to (design section 9.1).
+     */
+    private ForwardedResponse unknownOutcome(String requestId, URI server) {
+        Map<String, Object> envelope = new LinkedHashMap<>();
+        envelope.put("code", "outcome_unknown");
+        envelope.put("error", "outcome_unknown");
+        envelope.put("message", "The write sent to " + server + " was not answered, and may have been applied");
+        envelope.put("retryable", false);
+        envelope.put("requestId", requestId);
+        try {
+            return new ForwardedResponse(503, objectMapper.writeValueAsBytes(envelope),
+                    Map.of("Content-Type", "application/json"));
+        } catch (IOException unwritable) {
+            throw new java.io.UncheckedIOException(unwritable);
+        }
     }
 
     /** One seed's answer, or none, whether asking the next seed is safe, and what it answered, for the log. */
@@ -888,7 +912,9 @@ public final class HttpCatalogClient implements CatalogClient, ObservationClient
             String message = error.path("message").textValue();
             String leaderId = textOrNull(error.path("leaderId"));
             if (leaderId == null) leaderId = response.headers().firstValue(LEADER_ID_HEADER).orElse(null);
-            return error.path("retryable").booleanValue()
+            // An unknown outcome may have been applied, so the server does not mark it retryable. The client's
+            // registrations, heartbeats and observations are idempotent, so it replays them (design section 9.1).
+            return error.path("retryable").booleanValue() || "outcome_unknown".equals(code)
                     ? new CatalogOutcome.Retryable(code, message, leaderId)
                     : new CatalogOutcome.Rejected(code, message, leaderId);
         }
