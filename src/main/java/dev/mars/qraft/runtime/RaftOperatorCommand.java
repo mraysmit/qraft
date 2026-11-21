@@ -41,6 +41,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -48,8 +49,10 @@ import java.util.Set;
  * HTTP API, and any server will do: it forwards a removal to the leader.
  * <ul>
  *   <li>{@code list-peers} prints each server in the Raft configuration: name, server ID, address, whether it
- *       leads, and whether it votes;</li>
- *   <li>{@code remove-peer --id <server-id> | --name <name>} removes a server. It needs the operator token.</li>
+ *       leads, and whether it votes. With ACLs enabled it needs a token with {@code operator:read};</li>
+ *   <li>{@code remove-peer --id <server-id> | --name <name>} removes a server. It needs the operator token
+ *       ({@code server.operator.token}) with ACLs disabled, and a token with {@code operator:write} with them
+ *       enabled.</li>
  * </ul>
  * Two act offline on stopped data directories and contact no server, for lost-quorum recovery (membership
  * Step 7):
@@ -70,7 +73,8 @@ import java.util.Set;
  */
 final class RaftOperatorCommand {
     static final String USAGE = """
-            Usage: qraft operator raft list-peers [--http-addr <host:port>] [TLS options]
+            Usage: qraft operator raft list-peers [--http-addr <host:port>] [--token <token> | --token-file <path>] \
+            [TLS options]
                    qraft operator raft remove-peer (--id <server-id> | --name <name>) [--http-addr <host:port>] \
             (--token <token> | --token-file <path>) [TLS options]
                    qraft operator raft inspect --dir <path>
@@ -96,7 +100,7 @@ final class RaftOperatorCommand {
             if (args.length < 2 || !args[0].equals("raft")) throw new IllegalArgumentException("Unknown command");
             subcommand = args[1];
             Set<String> allowed = switch (subcommand) {
-                case "list-peers" -> withTls(Set.of("--http-addr"));
+                case "list-peers" -> withTls(Set.of("--http-addr", "--token", "--token-file"));
                 case "remove-peer" -> withTls(Set.of("--http-addr", "--token", "--token-file", "--id", "--name"));
                 case "inspect" -> Set.of("--dir");
                 case "recover" -> Set.of("--input");
@@ -121,7 +125,7 @@ final class RaftOperatorCommand {
         String base = baseUri(options.getOrDefault("--http-addr", DEFAULT_ADDRESS));
         try {
             return subcommand.equals("list-peers")
-                    ? listPeers(client, base, out, err)
+                    ? listPeers(client, base, options, out, err)
                     : removePeer(client, base, options, out, err);
         } catch (IOException unreachable) {
             err.println("Could not reach " + base + ": " + unreachable);
@@ -149,11 +153,35 @@ final class RaftOperatorCommand {
         }
     }
 
-    private static int listPeers(HttpClient client, String base, PrintStream out, PrintStream err)
-            throws IOException, InterruptedException {
-        HttpResponse<String> response = client.send(HttpRequest.newBuilder(URI.create(
-                        base + "/v1/operator/raft/configuration")).timeout(REQUEST_TIMEOUT).GET().build(),
-                HttpResponse.BodyHandlers.ofString());
+    /** The caller's token: the contents of {@code --token-file}, or {@code --token}, or empty when neither is given. */
+    private static Optional<String> token(Map<String, String> options) throws IOException {
+        if (options.containsKey("--token-file")) {
+            return Optional.of(Files.readString(Path.of(options.get("--token-file"))).strip());
+        }
+        return Optional.ofNullable(options.get("--token"));
+    }
+
+    private static int unreadableTokenFile(Map<String, String> options, IOException unreadable, PrintStream err) {
+        err.println("Could not read the token file " + options.get("--token-file") + ": " + unreadable);
+        return 1;
+    }
+
+    /**
+     * Lists the servers. With ACLs enabled the configuration read needs {@code operator:read}, so a token is sent
+     * when one is given (documentation cleanup list, decision 4).
+     */
+    private static int listPeers(HttpClient client, String base, Map<String, String> options, PrintStream out,
+                                 PrintStream err) throws IOException, InterruptedException {
+        Optional<String> token;
+        try {
+            token = token(options);
+        } catch (IOException unreadable) {
+            return unreadableTokenFile(options, unreadable, err);
+        }
+        HttpRequest.Builder request = HttpRequest.newBuilder(URI.create(base + "/v1/operator/raft/configuration"))
+                .timeout(REQUEST_TIMEOUT);
+        token.ifPresent(secret -> request.header("X-Qraft-Token", secret));
+        HttpResponse<String> response = client.send(request.GET().build(), HttpResponse.BodyHandlers.ofString());
         JsonNode body = JSON.readTree(response.body());
         if (response.statusCode() != 200) return refused(body, response.statusCode(), err);
         List<String[]> rows = new ArrayList<>();
@@ -250,15 +278,10 @@ final class RaftOperatorCommand {
     private static int removePeer(HttpClient client, String base, Map<String, String> options,
                                   PrintStream out, PrintStream err) throws IOException, InterruptedException {
         String token;
-        if (options.containsKey("--token-file")) {
-            try {
-                token = Files.readString(Path.of(options.get("--token-file"))).strip();
-            } catch (IOException unreadable) {
-                err.println("Could not read the token file " + options.get("--token-file") + ": " + unreadable);
-                return 1;
-            }
-        } else {
-            token = options.getOrDefault("--token", "");
+        try {
+            token = token(options).orElse("");
+        } catch (IOException unreadable) {
+            return unreadableTokenFile(options, unreadable, err);
         }
         String parameter = options.containsKey("--id")
                 ? "id=" + URLEncoder.encode(options.get("--id"), StandardCharsets.UTF_8)
