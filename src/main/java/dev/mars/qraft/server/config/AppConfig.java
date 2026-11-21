@@ -605,10 +605,7 @@ public final class AppConfig {
             throw new IllegalStateException("server.raft.port may be 0 only on a cluster's sole member: "
                     + "peers dial the configured Raft address");
         }
-        if (clash(getHttpPort(), getRaftPort()) || clash(getHttpPort(), getApiGrpcPort())
-                || clash(getRaftPort(), getApiGrpcPort())) {
-            throw new IllegalStateException("HTTP, Raft, and API gRPC ports must be different");
-        }
+        validateDistinctPorts();
         if (getRaftIoPoolSize() < 1 || getRaftIoPoolSize() > 100) {
             throw new IllegalStateException("Raft I/O pool size must be between 1 and 100");
         }
@@ -618,6 +615,23 @@ public final class AppConfig {
         if (getElectionTimeoutMs() < 1 || getHeartbeatIntervalMs() < 1) {
             throw new IllegalStateException("Raft timing intervals must be positive");
         }
+        // A leader must be heard within a follower's election timeout, or followers campaign against it (code
+        // defects list, item 15); hashicorp/raft's ValidateConfig makes the same demand of its timeouts.
+        if (getHeartbeatIntervalMs() >= getElectionTimeoutMs()) {
+            throw new IllegalStateException("server.raft.heartbeatIntervalMs (" + getHeartbeatIntervalMs()
+                    + ") must be less than server.raft.electionTimeoutMs (" + getElectionTimeoutMs() + ")");
+        }
+        if (getLogHardLimit() < 1) {
+            throw new IllegalStateException("server.raft.logHardLimit must be positive, got: " + getLogHardLimit());
+        }
+        if (getShutdownDrainTimeoutMs() < 0) {
+            throw new IllegalStateException("server.shutdown.drainTimeoutMs must not be negative, got: "
+                    + getShutdownDrainTimeoutMs());
+        }
+        if (getShutdownTimeoutMs() < 0) {
+            throw new IllegalStateException("server.shutdown.timeoutMs must not be negative, got: "
+                    + getShutdownTimeoutMs());
+        }
         if (getSnapshotThreshold() < 1 || getSnapshotCheckIntervalMs() < 1000) {
             throw new IllegalStateException("Snapshot threshold must be positive and check interval at least 1000ms");
         }
@@ -625,7 +639,36 @@ public final class AppConfig {
             throw new IllegalStateException("Raft storage type must be 'raftlog'");
         }
         if (!getRaftStorageFsync()) throw new IllegalStateException("Raft WAL fsync must be enabled for durability");
-        getNodeId();
+        String self = getNodeId();
+        // A server's own entry is the Raft address it advertises; without one every listed server is a peer.
+        Map<String, String> nodes = settings.raft().nodes();
+        if (!nodes.isEmpty() && !nodes.containsKey(self)) {
+            throw new IllegalStateException("server.id '" + self + "' is not a key of server.raft.nodes, which lists: "
+                    + String.join(", ", nodes.keySet()));
+        }
+    }
+
+    /**
+     * Refuses two listeners on one nonzero port, naming both settings: HTTP, Raft and API gRPC, the Prometheus
+     * listener while telemetry is on, and the DNS listener, which serves TCP as well as UDP (code defects list,
+     * item 15). Consul's configuration builder likewise refuses an address two of its listeners share.
+     */
+    private void validateDistinctPorts() {
+        Map<String, Integer> listeners = new LinkedHashMap<>();
+        listeners.put("server.http.port", getHttpPort());
+        listeners.put("server.raft.port", getRaftPort());
+        listeners.put("server.apiGrpcPort", getApiGrpcPort());
+        if (isTelemetryEnabled()) listeners.put("server.telemetry.prometheusPort", getPrometheusPort());
+        getDns().ifPresent(dns -> listeners.put("server.dns.port", dns.port()));
+        List<Map.Entry<String, Integer>> ports = List.copyOf(listeners.entrySet());
+        for (int first = 0; first < ports.size(); first++) {
+            for (int second = first + 1; second < ports.size(); second++) {
+                if (clash(ports.get(first).getValue(), ports.get(second).getValue())) {
+                    throw new IllegalStateException(ports.get(first).getKey() + " and " + ports.get(second).getKey()
+                            + " are both " + ports.get(first).getValue() + ": each listener needs its own port");
+                }
+            }
+        }
     }
 
     /**
@@ -676,23 +719,44 @@ public final class AppConfig {
         logSecurityWarning();
     }
 
+    /** {@code words} as a phrase: "a", "a and b", "a, b and c". */
+    private static String inWords(List<String> words) {
+        if (words.size() == 1) return words.getFirst();
+        return String.join(", ", words.subList(0, words.size() - 1)) + " and " + words.getLast();
+    }
+
     /**
      * The one startup warning a server's ACL settings call for, or none (ACL list, proposals 12, 14 and 16). With ACLs
      * disabled, every call is allowed: a {@code deny} default policy then says so as a critical warning, and otherwise
-     * the development profile does. With ACLs enabled, tokens cross the network unencrypted until transport security
-     * is added (proposal 14).
+     * the development profile does. With ACLs enabled, a warning names each listener that does not use TLS, since
+     * tokens sent to it cross the network unencrypted: HTTP, API gRPC, and Raft, which carries forwarded writes.
      */
     private void logSecurityWarning() {
         if (isAclEnabled()) {
-            if (!isHttpsEnabled() && !isGrpcTlsEnabled()) {
+            // A follower forwards a write with its token over the Raft port, so it carries tokens too (code defects
+            // list, item 5).
+            List<String> plain = new ArrayList<>();
+            List<String> settings = new ArrayList<>();
+            if (!isHttpsEnabled()) {
+                plain.add("HTTP");
+                settings.add("server.tls.https");
+            }
+            if (!isGrpcTlsEnabled()) {
+                plain.add("API gRPC");
+                settings.add("server.tls.grpc");
+            }
+            if (!isRaftTlsEnabled()) {
+                plain.add("Raft");
+                settings.add("server.tls.raft");
+            }
+            if (plain.size() == 3) {
                 Logging.LOGGER.warn("ACLs are enabled, but no listener uses TLS: tokens cross the network "
-                        + "unencrypted. Set server.tls.https and server.tls.grpc");
-            } else if (!isGrpcTlsEnabled()) {
-                Logging.LOGGER.warn("ACLs are enabled, but the API gRPC listener does not use TLS: tokens sent to "
-                        + "it cross the network unencrypted. Set server.tls.grpc");
-            } else if (!isHttpsEnabled()) {
-                Logging.LOGGER.warn("ACLs are enabled, but the HTTP listener does not use TLS: tokens sent to it "
-                        + "cross the network unencrypted. Set server.tls.https");
+                        + "unencrypted. Set {}", inWords(settings));
+            } else if (!plain.isEmpty()) {
+                boolean one = plain.size() == 1;
+                Logging.LOGGER.warn("ACLs are enabled, but the {} {} not use TLS: tokens sent to {} cross the network "
+                                + "unencrypted. Set {}", inWords(plain) + (one ? " listener" : " listeners"),
+                        one ? "does" : "do", one ? "it" : "them", inWords(settings));
             }
         } else if (getAclDefaultPolicy().orElse(null) == AclDefaultPolicy.DENY) {
             Logging.LOGGER.warn("CRITICAL ACL_DENY_NOT_ENFORCED: server.acl.defaultPolicy is deny, but ACLs are "
