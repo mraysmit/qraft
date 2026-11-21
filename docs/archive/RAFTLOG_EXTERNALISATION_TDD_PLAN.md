@@ -41,7 +41,7 @@ Completed on 2026-09-22:
 - Tranche 8 system-level failure and container matrix implemented; see the
   Tranche 8 disposition below and the task list in
   [`task-list-22-sep-2026.md`](task-list-22-sep-2026.md).
-- Operator runbook added: [`RAFT_STORAGE_OPERATIONS.md`](../RAFT_STORAGE_OPERATIONS.md).
+- Operator runbook added: [`RAFT_STORAGE_OPERATIONS.md`](../OPERATIONS.md).
 - Full reactor green: controller 307 tests including 8 Docker acceptance tests,
   core 231, distributed-state 14, agent 13, runtime 13, tenant 5; zero failures,
   errors, or skips. Five-node `NetworkPartitionTest` re-enabled and passing.
@@ -514,7 +514,7 @@ mapped to HTTP `outcome_unknown` with `retryable: true`; leadership no-op entry
 after recovery with uncommitted suffix; fenced recovery leaves the node live but
 unready instead of failing startup; `FileSnapshotStore` refuses to open over an
 unpublished first-snapshot temporary. Operator procedures are in
-[`RAFT_STORAGE_OPERATIONS.md`](../RAFT_STORAGE_OPERATIONS.md).
+[`RAFT_STORAGE_OPERATIONS.md`](../OPERATIONS.md).
 
 ## 7. Test fixture design
 
