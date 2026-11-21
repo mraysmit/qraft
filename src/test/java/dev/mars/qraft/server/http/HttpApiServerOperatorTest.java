@@ -116,6 +116,11 @@ class HttpApiServerOperatorTest {
         assertTrue(a.get("voter").asBoolean());
         assertTrue(a.get("leader").asBoolean());
         assertEquals(false, servers.get(1).get("leader").asBoolean());
+        HttpResponse<String> unknown = send("GET", "/v1/operator/raft/configuration?verbose", Map.of());
+        assertEquals(400, unknown.statusCode(), "an unknown parameter is refused (code defects list, item 13)");
+        assertEquals("invalid_query", JSON.readTree(unknown.body()).path("code").asText());
+        assertEquals(200, send("GET", "/v1/operator/raft/configuration?stale", Map.of()).statusCode(),
+                "the read options are taken, as Consul's ?stale");
     }
 
     @Test
