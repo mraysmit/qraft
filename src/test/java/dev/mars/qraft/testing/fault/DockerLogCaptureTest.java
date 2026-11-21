@@ -16,6 +16,7 @@
 
 package dev.mars.qraft.testing.fault;
 
+import dev.mars.qraft.testing.LogCapturesHelper;
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
@@ -631,7 +632,8 @@ class DockerLogCaptureTest {
         assertEquals(UNRESOLVED_PEER.replace("WARN  ", "WARN  *** INTENTIONAL ERROR: RAFT_PEER_NAME_UNRESOLVED, "
                         + "caused by UnresolvedPeerDockerClass *** ") + LOOKUP_TRACE,
                 Files.readString(directory.resolve("UnresolvedPeerDockerClass/server1.log")));
-        assertEquals(java.util.List.of(Level.WARN), reprinted.list.stream().map(ILoggingEvent::getLevel).toList());
+        assertEquals(java.util.List.of(Level.WARN),
+                LogCapturesHelper.snapshot(reprinted).stream().map(ILoggingEvent::getLevel).toList());
     }
 
     @Test
