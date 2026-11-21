@@ -5,7 +5,7 @@
 **Last updated:** 2026-11-08 (the final run recorded, and the list complete and archived. Earlier the same day: phases 1 to 3 built)
 **Follows:** [`task-list-client-endpoint-metric-2026-11-08.md`](task-list-client-endpoint-metric-2026-11-08.md)
 **Design:** [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](../../docs-design/QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), section 15.2
-**Validation:** [`QRAFT_FEATURE_VALIDATION_2026-10-21.md`](../../docs-design/QRAFT_FEATURE_VALIDATION_2026-10-21.md), the security row
+**Validation:** [`QRAFT_FEATURE_VALIDATION_2026-10-21.md`](QRAFT_FEATURE_VALIDATION_2026-10-21.md), the security row
 **Standards:** [`PROJECT_STANDARDS.md`](../PROJECT_STANDARDS.md)
 
 ## 1. Goal
