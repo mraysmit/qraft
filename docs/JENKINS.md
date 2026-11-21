@@ -671,6 +671,18 @@ Docker stages (`-DskipVitest=true`). The audit, over the console, the archived l
 test reports, 907 files, found 1,175 error lines, all flagged, and 857 stack traces, none unflagged; no
 `too_many_pings` and no JVM crash file. The logs are in `logs/jenkins/Qraft-76/`.
 
+## Build 87, 2026-11-20
+
+Build 87 ran on `1143f27`, the open items' work of 2026-11-20 ([`task-list-open-items-2026-11-20.md`](archive/task-list-open-items-2026-11-20.md)):
+hidden tabs releasing their long reads, the client's lines for retried requests, renewals bounded by the time left,
+and the audit file's rotation. It passed in 30 min 23 s: default 2,094 with every coverage gate met and Vitest 379,
+end-to-end 36, and Docker and `slow` 52, no failures, errors or skips; the job's test report counts 2,182. The audit,
+over the console, the archived logs (25 Docker archive folders) and the test reports, 929 files, found 1,690 error
+lines and 1,175 stack traces, every one flagged; the 24 under `Channel Pipeline:` are each two lines below a flagged
+`RAFT_PEER_UNREACHABLE` from `GrpcRaftTlsTest`. No `too_many_pings` and no JVM crash file. A leader stepped down by
+check-quorum only in `DockerClientTopologyTest`, `DockerDurableRestartTest` and `DockerRunningPartitionTest`, which cut
+one off on purpose, as in every build since 64. The logs are in `logs/jenkins/Qraft-87/`.
+
 ## Build 86, 2026-11-20
 
 Build 86 ran on `8297836`, the shared port helper of 2026-11-20 with build 85's record, after Jenkins was restarted
