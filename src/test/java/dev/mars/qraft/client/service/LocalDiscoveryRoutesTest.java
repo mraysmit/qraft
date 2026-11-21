@@ -168,6 +168,32 @@ class LocalDiscoveryRoutesTest {
         assertEquals("request-7", asked.getFirst().requestId(), "the servers' logs can be followed back to the request");
     }
 
+    /**
+     * A server that left out what the token may not read says so, and the application must hear it, as the client's
+     * key/value, session and tenancy forwarding already tells it (handover of 2026-11-21, section 5).
+     */
+    @Test
+    void aReadTheServerFilteredByAclsSaysSo() throws Exception {
+        start(server(200, "{}", Map.of("X-Qraft-Results-Filtered-By-ACLs", "true")));
+
+        HttpResponse<String> answer = send("GET", "/v1/catalog/services", Map.of());
+
+        assertEquals(200, answer.statusCode(), answer.body());
+        assertEquals("true", answer.headers().firstValue("X-Qraft-Results-Filtered-By-ACLs").orElse(null),
+                "the server's filter header is passed on");
+    }
+
+    @Test
+    void aReadTheServerDidNotFilterCarriesNoFilterHeader() throws Exception {
+        start(server(200, "{}", Map.of()));
+
+        HttpResponse<String> answer = send("GET", "/v1/catalog/services", Map.of());
+
+        assertEquals(200, answer.statusCode(), answer.body());
+        assertTrue(answer.headers().firstValue("X-Qraft-Results-Filtered-By-ACLs").isEmpty(),
+                "no filter header is invented");
+    }
+
     @Test
     void aServersRefusalIsPassedOnUnchanged() throws Exception {
         String body = "{\"code\":\"invalid_query\",\"error\":\"invalid_query\",\"message\":\"No\","
@@ -214,13 +240,15 @@ class LocalDiscoveryRoutesTest {
         assertEquals("client-1", asked.getFirst().node());
     }
 
+    // A byte above 0x7e: the JDK's listener takes it (from 2026-10 it refuses control characters itself), the client
+    // sending it on cannot.
     @Test
     void aScopeThatCannotBeSentOnIsRefusedWithoutAskingTheServers() throws Exception {
         start(server(200, "[]", Map.of()));
 
         try (Socket socket = new Socket("127.0.0.1", api.port())) {
             socket.getOutputStream().write(("GET /v1/catalog/services HTTP/1.1\r\nHost: 127.0.0.1\r\n"
-                    + "X-Qraft-Tenant: a\u0001b\r\nConnection: close\r\n\r\n").getBytes(StandardCharsets.ISO_8859_1));
+                    + "X-Qraft-Tenant: aéb\r\nConnection: close\r\n\r\n").getBytes(StandardCharsets.ISO_8859_1));
             String answer = new String(socket.getInputStream().readAllBytes(), StandardCharsets.ISO_8859_1);
 
             assertTrue(answer.startsWith("HTTP/1.1 400"), answer);
@@ -235,7 +263,7 @@ class LocalDiscoveryRoutesTest {
 
         try (Socket socket = new Socket("127.0.0.1", api.port())) {
             socket.getOutputStream().write(("GET /v1/catalog/services HTTP/1.1\r\nHost: 127.0.0.1\r\n"
-                    + "X-Request-Id: a\u0001b\r\nConnection: close\r\n\r\n").getBytes(StandardCharsets.ISO_8859_1));
+                    + "X-Request-Id: aéb\r\nConnection: close\r\n\r\n").getBytes(StandardCharsets.ISO_8859_1));
             String answer = new String(socket.getInputStream().readAllBytes(), StandardCharsets.ISO_8859_1);
 
             assertTrue(answer.startsWith("HTTP/1.1 400"), answer);

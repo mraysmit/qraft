@@ -119,7 +119,10 @@ public final class LocalDiscoveryRoutes {
         passOn(exchange, read.get());
     }
 
-    /** The listener takes control characters in a header value, which the client sending it on refuses. */
+    /**
+     * The listener takes characters in a header value that the client sending it on refuses: tab and bytes above 0x7e,
+     * and on a JDK without the October 2026 security fixes, the other control characters too.
+     */
     private static boolean sendable(String value) {
         return value.chars().allMatch(character -> character >= 0x20 && character < 0x7f);
     }
@@ -127,6 +130,8 @@ public final class LocalDiscoveryRoutes {
     private static void passOn(HttpExchange exchange, ForwardedRead read) throws IOException {
         read.index().ifPresent(index -> exchange.getResponseHeaders().set("X-Qraft-Index", index));
         read.leaderId().ifPresent(leader -> exchange.getResponseHeaders().set("X-Qraft-Leader-Id", leader));
+        read.filteredByAcls().ifPresent(filtered ->
+                exchange.getResponseHeaders().set("X-Qraft-Results-Filtered-By-ACLs", filtered));
         exchange.getResponseHeaders().set("Content-Type", "application/json");
         byte[] body = read.body().getBytes(StandardCharsets.UTF_8);
         exchange.sendResponseHeaders(read.status(), body.length == 0 ? -1 : body.length);

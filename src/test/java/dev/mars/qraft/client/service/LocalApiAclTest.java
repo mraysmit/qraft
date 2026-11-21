@@ -362,7 +362,7 @@ class LocalApiAclTest {
         LocalDiscoveryRoutes.ForwardedReads reads = (pathAndQuery, requestId, headers) -> {
             forwarded.add(Map.copyOf(headers));
             return CompletableFuture.completedFuture(Optional.of(new ForwardedRead(200, "[]", Optional.empty(),
-                    Optional.empty())));
+                    Optional.empty(), Optional.empty())));
         };
         new LocalClientRoutes(config, "6a1b7c2d-3e4f-4a5b-8c6d-7e8f9a0b1c2d",
                 () -> new ReadinessPolicy.Conditions(true, true, true, true, true),

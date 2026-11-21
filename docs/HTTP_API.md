@@ -647,9 +647,9 @@ The client tries its configured servers (`servers.urls`) in turn:
   retryable, in the server's error envelope, and no other server is asked.
 
 When no server can be asked, the route answers 503 `no_server_reachable`. Otherwise the server's status and body are
-passed on. A blocking read's timeout is extended by its `wait`. The forwarded discovery reads pass on
-`X-Qraft-Index` and `X-Qraft-Leader-Id`; the key/value, session and tenancy routes pass on `Content-Type`,
-`X-Qraft-Index`, `X-Qraft-Leader-Id` and `X-Qraft-Results-Filtered-By-ACLs`.
+passed on. A blocking read's timeout is extended by its `wait`. The forwarded discovery reads and
+`/v1/client/members` pass on `X-Qraft-Index`, `X-Qraft-Leader-Id` and `X-Qraft-Results-Filtered-By-ACLs`; the
+key/value, session and tenancy routes pass on those and `Content-Type`.
 
 ## 6. Not provided
 

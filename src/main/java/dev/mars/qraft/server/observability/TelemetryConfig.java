@@ -77,8 +77,9 @@ public class TelemetryConfig {
             OpenTelemetrySdk openTelemetry = OpenTelemetrySdk.builder()
                     .setTracerProvider(tracerProvider).setMeterProvider(meterProvider).buildAndRegisterGlobal();
             OpenTelemetryAppender.install(openTelemetry);
+            // The endpoint without its user information: credentials in the URL must not reach the log.
             logger.info("OpenTelemetry configured: service={}, otlp={}, prometheus={}",
-                    serviceName, configuredOtlpEndpoint, configuredPrometheusPort);
+                    serviceName, config.getRedactedOtlpEndpoint(), configuredPrometheusPort);
             return openTelemetry::close;
         } catch (RuntimeException | Error failure) {
             closeAfterFailedInitialization(meterProvider == null ? prometheusReader : meterProvider, failure);

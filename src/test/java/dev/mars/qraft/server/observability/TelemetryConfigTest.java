@@ -16,16 +16,23 @@
 
 package dev.mars.qraft.server.observability;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import dev.mars.qraft.server.config.AppConfig;
+import dev.mars.qraft.testing.LogCapturesHelper;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 import org.junit.jupiter.api.parallel.ResourceLock;
 import io.opentelemetry.api.GlobalOpenTelemetry;
 import io.opentelemetry.api.OpenTelemetry;
 import io.opentelemetry.instrumentation.logback.appender.v1_0.OpenTelemetryAppender;
 import java.net.ServerSocket;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -60,6 +67,36 @@ class TelemetryConfigTest {
             assertEquals(0, TelemetryConfig.getPrometheusPort());
             assertEquals(config.getOtlpEndpoint(), TelemetryConfig.getOtlpEndpoint());
         } finally {
+            OpenTelemetryAppender.install(OpenTelemetry.noop());
+            GlobalOpenTelemetry.resetForTest();
+        }
+        awaitSpanWorkers(before);
+    }
+
+    /**
+     * The startup line names the OTLP endpoint without its user information, as the application's own line and the
+     * effective configuration do: credentials in that URL must not reach the log (handover of 2026-11-21, section 5).
+     */
+    @Test
+    void theConfiguredLineLeavesTheEndpointsCredentialsOut() throws Exception {
+        GlobalOpenTelemetry.resetForTest();
+        int before = spanWorkers();
+        AppConfig config = AppConfig.fromJson("{\"version\":1,\"server\":{\"telemetry\":{\"prometheusPort\":0,"
+                + "\"otlpEndpoint\":\"http://collector-user:collector-secret@localhost:4317\"}}}");
+        Logger logger = (Logger) LoggerFactory.getLogger(TelemetryConfig.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try (AutoCloseable telemetry = TelemetryConfig.configure(config)) {
+            List<String> lines = LogCapturesHelper.snapshot(appender).stream()
+                    .map(ILoggingEvent::getFormattedMessage)
+                    .filter(message -> message.startsWith("OpenTelemetry configured")).toList();
+            assertEquals(1, lines.size(), "one configured line: " + lines);
+            assertFalse(lines.getFirst().contains("collector-secret"), "the password is withheld: " + lines);
+            assertFalse(lines.getFirst().contains("collector-user"), "the user name is withheld: " + lines);
+            assertTrue(lines.getFirst().contains("otlp=http://localhost:4317"), "the endpoint is named: " + lines);
+        } finally {
+            logger.detachAppender(appender);
             OpenTelemetryAppender.install(OpenTelemetry.noop());
             GlobalOpenTelemetry.resetForTest();
         }

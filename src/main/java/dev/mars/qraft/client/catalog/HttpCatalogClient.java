@@ -60,6 +60,7 @@ import java.util.function.Function;
  */
 public final class HttpCatalogClient implements CatalogClient, ObservationClient {
     private static final String LEADER_ID_HEADER = "X-Qraft-Leader-Id";
+    private static final String FILTERED_BY_ACLS_HEADER = "X-Qraft-Results-Filtered-By-ACLs";
 
     private static final org.slf4j.Logger LOGGER = org.slf4j.LoggerFactory.getLogger(HttpCatalogClient.class);
     private final HttpClient httpClient;
@@ -499,7 +500,7 @@ public final class HttpCatalogClient implements CatalogClient, ObservationClient
 
     /** The headers of a server's answer that a forwarded request passes on to the application. */
     private static final java.util.List<String> PASSED_ON = java.util.List.of("Content-Type", "X-Qraft-Index",
-            LEADER_ID_HEADER, "X-Qraft-Results-Filtered-By-ACLs");
+            LEADER_ID_HEADER, FILTERED_BY_ACLS_HEADER);
 
     /**
      * Forwards an application's request across the server seeds and keeps the answer as it came (key/value list,
@@ -620,7 +621,8 @@ public final class HttpCatalogClient implements CatalogClient, ObservationClient
 
     private static ForwardedRead forwarded(HttpResponse<String> response) {
         return new ForwardedRead(response.statusCode(), response.body(),
-                response.headers().firstValue("X-Qraft-Index"), response.headers().firstValue(LEADER_ID_HEADER));
+                response.headers().firstValue("X-Qraft-Index"), response.headers().firstValue(LEADER_ID_HEADER),
+                response.headers().firstValue(FILTERED_BY_ACLS_HEADER));
     }
 
     private static CatalogLookupOutcome.Retryable lookupRetryable(

@@ -563,7 +563,8 @@ class HttpCatalogClientTest {
         ForwardedRead read = selectedClient(List.of(server)).forwardRead("/v1/health/service/web?passing", "request-7", java.util.Map.of())
                 .get(10, TimeUnit.SECONDS).orElseThrow();
 
-        assertEquals(new ForwardedRead(200, "[1,2]", java.util.Optional.of("7"), java.util.Optional.of("server-2")), read);
+        assertEquals(new ForwardedRead(200, "[1,2]", java.util.Optional.of("7"), java.util.Optional.of("server-2"),
+                java.util.Optional.empty()), read);
         assertEquals("GET", request.get().method());
         assertEquals("/v1/health/service/web", request.get().path());
         assertEquals("passing", query.get());

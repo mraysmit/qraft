@@ -220,6 +220,23 @@ class LocalClientRoutesTest {
         assertEquals("request-7", requestId.get(), "the servers' logs can be followed back to the request");
     }
 
+    /** Members the server left out for the token are said to be left out (handover of 2026-11-21, section 5). */
+    @Test
+    void membersTheServerFilteredByAclsSaySo() throws Exception {
+        start(stubServer(exchange -> {
+            exchange.getResponseHeaders().set("X-Qraft-Results-Filtered-By-ACLs", "true");
+            byte[] body = "[]".getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, body.length);
+            try (var output = exchange.getResponseBody()) { output.write(body); }
+        }));
+
+        HttpResponse<String> members = send("GET", "/v1/client/members");
+
+        assertEquals(200, members.statusCode(), members.body());
+        assertEquals("true", members.headers().firstValue("X-Qraft-Results-Filtered-By-ACLs").orElse(null),
+                "the server's filter header is passed on");
+    }
+
     @Test
     void membersCarryTheCallersQueryToTheServersWhichDecideWhatToDoWithIt() throws Exception {
         AtomicReference<String> asked = new AtomicReference<>();

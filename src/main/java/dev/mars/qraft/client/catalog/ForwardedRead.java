@@ -26,9 +26,12 @@ import java.util.Optional;
  * @param body     the server's body
  * @param index    its {@code X-Qraft-Index}, when it sent one
  * @param leaderId its {@code X-Qraft-Leader-Id}, when it sent one
+ * @param filteredByAcls its {@code X-Qraft-Results-Filtered-By-ACLs}, when it sent one: the answer leaves out what the
+ *                       token may not read
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-10-31
- * @version 1.0
+ * @version 1.1
  */
-public record ForwardedRead(int status, String body, Optional<String> index, Optional<String> leaderId) {
+public record ForwardedRead(int status, String body, Optional<String> index, Optional<String> leaderId,
+                            Optional<String> filteredByAcls) {
 }
