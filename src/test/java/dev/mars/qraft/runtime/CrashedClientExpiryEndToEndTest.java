@@ -88,7 +88,7 @@ class CrashedClientExpiryEndToEndTest {
     void theLeaderExpiresAndDeregistersTheServicesOfAKilledClient() throws Exception {
         Path serverConfig = temporaryDirectory.resolve("server.json");
         Path clientConfig = temporaryDirectory.resolve("client.json");
-        writeServerConfig(serverConfig, 0, 0, 0);
+        writeServerConfig(serverConfig, 0, 0);
         RuntimeLifecycle server = QraftRuntimeApplication.launch(new String[]{"server", "--config", serverConfig.toString()});
         lifecycles.add(server);
         int httpPort = server.boundPorts().get("http");
@@ -125,7 +125,7 @@ class CrashedClientExpiryEndToEndTest {
     void theLeaderMarksAKilledClientUnreachableThenReapsItWithItsCheckFreeServices() throws Exception {
         Path serverConfig = temporaryDirectory.resolve("server.json");
         Path clientConfig = temporaryDirectory.resolve("client.json");
-        writeServerConfig(serverConfig, 0, 0, 0);
+        writeServerConfig(serverConfig, 0, 0);
         RuntimeLifecycle server = QraftRuntimeApplication.launch(new String[]{"server", "--config", serverConfig.toString()});
         lifecycles.add(server);
         int httpPort = server.boundPorts().get("http");
@@ -152,7 +152,7 @@ class CrashedClientExpiryEndToEndTest {
     void aKilledClientsServiceWithAnUnexpiredCheckLeavesPassingOnceItsNodeIsUnreachableAndStaysListed() throws Exception {
         Path serverConfig = temporaryDirectory.resolve("server.json");
         Path clientConfig = temporaryDirectory.resolve("client.json");
-        writeServerConfig(serverConfig, 0, 0, 0, 600_000);
+        writeServerConfig(serverConfig, 0, 0, 600_000);
         RuntimeLifecycle server = QraftRuntimeApplication.launch(new String[]{"server", "--config", serverConfig.toString()});
         lifecycles.add(server);
         int httpPort = server.boundPorts().get("http");
@@ -273,19 +273,18 @@ class CrashedClientExpiryEndToEndTest {
         assertTrue(condition.evaluate(), "condition was not met before the deadline");
     }
 
-    private void writeServerConfig(Path target, int httpPort, int raftPort, int apiGrpcPort) throws Exception {
-        writeServerConfig(target, httpPort, raftPort, apiGrpcPort, 5000);
+    private void writeServerConfig(Path target, int httpPort, int raftPort) throws Exception {
+        writeServerConfig(target, httpPort, raftPort, 5000);
     }
 
-    private void writeServerConfig(Path target, int httpPort, int raftPort, int apiGrpcPort,
-                                   long nodeReapAfterMs) throws Exception {
+    private void writeServerConfig(Path target, int httpPort, int raftPort, long nodeReapAfterMs)
+            throws Exception {
         Files.writeString(target, """
                 {
                   "version": 1,
                   "server": {
                     "id": "expiry-node",
                     "http": {"host": "127.0.0.1", "port": %d},
-                    "apiGrpcPort": %d,
                     "raft": {
                       "port": %d,
                       "nodes": {"expiry-node": "127.0.0.1:%d"},
@@ -299,7 +298,7 @@ class CrashedClientExpiryEndToEndTest {
                   },
                   "logging": {"directory": %s}
                 }
-                """.formatted(httpPort, apiGrpcPort, raftPort, raftPort,
+                """.formatted(httpPort, raftPort, raftPort,
                 JSON.writeValueAsString(temporaryDirectory.resolve("raft").toString()), nodeReapAfterMs,
                 JSON.writeValueAsString(temporaryDirectory.resolve("logs").toString())));
     }
