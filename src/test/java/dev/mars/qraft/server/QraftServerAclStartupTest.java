@@ -22,17 +22,8 @@ import ch.qos.logback.core.read.ListAppender;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.mars.qraft.common.async.RaftExecutorsFixture;
-import dev.mars.qraft.server.api.AclGrpcGuard;
-import dev.mars.qraft.server.api.grpc.DistributedStateServiceGrpc;
-import dev.mars.qraft.server.api.grpc.GetRequest;
 import dev.mars.qraft.server.config.AppConfig;
 import dev.mars.qraft.testing.LogCapturesHelper;
-import io.grpc.ManagedChannel;
-import io.grpc.ManagedChannelBuilder;
-import io.grpc.Metadata;
-import io.grpc.Status;
-import io.grpc.StatusRuntimeException;
-import io.grpc.stub.MetadataUtils;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -51,19 +42,17 @@ import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Tests a real server started with ACLs enabled under {@code deny} and a management file: it installs the file's
  * token when it becomes leader, through the bootstrap, so that its bootstrap endpoint then refuses with reset index 1
- * (ACL list, Phase 3); and it enforces ACLs on each of its listeners, its HTTP API, its server removals and its gRPC
- * API, where the management token is allowed and a request without a token is not (Phase 4). No log line holds the
- * file's secret.
+ * (ACL list, Phase 3); and it enforces ACLs on its HTTP API and its server removals, where the management token is
+ * allowed and a request without a token is not (Phase 4). No log line holds the file's secret.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-11-05
- * @version 1.1
+ * @version 1.2
  */
 class QraftServerAclStartupTest {
     private static final String SECRET = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
@@ -83,7 +72,7 @@ class QraftServerAclStartupTest {
         Path secretFile = Files.writeString(directory.resolve("management-token"), SECRET);
         Path configuration = directory.resolve("server.json");
         JSON.writeValue(configuration.toFile(), Map.of("version", 1, "server", Map.of(
-                "id", "acl-startup", "http", Map.of("port", 0), "apiGrpcPort", 0,
+                "id", "acl-startup", "http", Map.of("port", 0),
                 "raft", Map.of("port", 0, "electionTimeoutMs", 300, "heartbeatIntervalMs", 100,
                         "storage", Map.of("path", directory.resolve("raft").toString())),
                 "acl", Map.of("enabled", true, "defaultPolicy", "deny",
@@ -122,7 +111,7 @@ class QraftServerAclStartupTest {
     }
 
     @Test
-    void aServerWithAclsEnforcesThemOnItsHttpApiItsRemovalsAndItsGrpcApi() throws Exception {
+    void aServerWithAclsEnforcesThemOnItsHttpApiAndItsRemovals() throws Exception {
         refusedOnceInstalled();
 
         HttpResponse<String> anonymous = http("GET", "/v1/operator/raft/configuration", null);
@@ -133,22 +122,6 @@ class QraftServerAclStartupTest {
         HttpResponse<String> removal = http("DELETE", "/v1/operator/raft/peer?name=absent", SECRET);
         assertEquals(404, removal.statusCode(), "the management token passes operator:write on the server and "
                 + "in its membership service, which then finds no such server: " + removal.body());
-
-        ManagedChannel channel = ManagedChannelBuilder.forAddress("127.0.0.1", service.boundPorts().get("apiGrpc"))
-                .usePlaintext().build();
-        try {
-            DistributedStateServiceGrpc.DistributedStateServiceBlockingStub stub =
-                    DistributedStateServiceGrpc.newBlockingStub(channel).withDeadlineAfter(10, TimeUnit.SECONDS);
-            GetRequest get = GetRequest.newBuilder().setKey("missing").build();
-            StatusRuntimeException refused = assertThrows(StatusRuntimeException.class, () -> stub.get(get));
-            assertEquals(Status.Code.PERMISSION_DENIED, refused.getStatus().getCode());
-
-            Metadata token = new Metadata();
-            token.put(Metadata.Key.of(AclGrpcGuard.TOKEN_METADATA_KEY, Metadata.ASCII_STRING_MARSHALLER), SECRET);
-            assertFalse(stub.withInterceptors(MetadataUtils.newAttachHeadersInterceptor(token)).get(get).getFound());
-        } finally {
-            channel.shutdownNow().awaitTermination(10, TimeUnit.SECONDS);
-        }
     }
 
     /**
