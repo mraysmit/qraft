@@ -546,7 +546,7 @@ class HealthPropagationEndToEndTest {
         assertTrue(condition.evaluate(), "condition was not met before the deadline");
     }
 
-    /** Writes a server configuration whose HTTP and API gRPC listeners bind any free port. */
+    /** Writes a server configuration whose HTTP listener binds any free port. */
     private void writeServerConfig(Path target, String nodeId, Map<String, Integer> raftPorts)
             throws Exception {
         Map<String, String> members = new LinkedHashMap<>();
@@ -557,7 +557,6 @@ class HealthPropagationEndToEndTest {
                   "server": {
                     "id": %s,
                     "http": {"host": "127.0.0.1", "port": %d},
-                    "apiGrpcPort": %d,
                     "raft": {
                       "port": %d,
                       "nodes": %s,
@@ -571,7 +570,7 @@ class HealthPropagationEndToEndTest {
                   },
                   "logging": {"directory": %s}
                 }
-                """.formatted(JSON.writeValueAsString(nodeId), 0, 0, raftPorts.get(nodeId),
+                """.formatted(JSON.writeValueAsString(nodeId), 0, raftPorts.get(nodeId),
                 JSON.writeValueAsString(members),
                 JSON.writeValueAsString(temporaryDirectory.resolve("raft-" + nodeId).toString()),
                 JSON.writeValueAsString(temporaryDirectory.resolve("logs").toString())));
