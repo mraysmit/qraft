@@ -230,7 +230,6 @@ class WipedClientDirectoryEndToEndTest {
                   "server": {
                     "id": "identity-node",
                     "http": {"host": "127.0.0.1", "port": 0},
-                    "apiGrpcPort": 0,
                     "raft": {
                       "port": 0,
                       "nodes": {"identity-node": "127.0.0.1:0"},
