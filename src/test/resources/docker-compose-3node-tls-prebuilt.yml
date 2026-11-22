@@ -1,5 +1,5 @@
 # 3-node Raft cluster serving only TLS, using the pre-built image (transport security list, Phase 6):
-# HTTPS and API gRPC TLS requiring a client certificate, and mutual TLS on the Raft port. The test
+# HTTPS requiring a client certificate, and mutual TLS on the Raft port. The test
 # certificates are mounted from src/test/resources/tls; they are public and for tests only. The health
 # check presents the test client certificate.
 # Requires qraft-runtime:test image - built by SharedDockerClusterFixture.
