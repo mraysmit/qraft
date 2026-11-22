@@ -79,7 +79,7 @@ class QraftServerHttpHostTest {
         if (host != null) http.put("host", host);
         Path configuration = directory.resolve("server.json");
         JSON.writeValue(configuration.toFile(), Map.of("version", 1, "server", Map.of(
-                "id", "host-test", "http", http, "apiGrpcPort", 0,
+                "id", "host-test", "http", http,
                 "raft", Map.of("port", 0, "electionTimeoutMs", 300, "heartbeatIntervalMs", 100,
                         "storage", Map.of("path", directory.resolve("raft").toString())),
                 "telemetry", Map.of("enabled", false))));
