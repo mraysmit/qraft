@@ -62,7 +62,7 @@ class QraftServerDrainTest {
     void aStoppingServerDrainsItsHttpApiBeforeItStopsIt() throws Exception {
         Path configuration = directory.resolve("server.json");
         JSON.writeValue(configuration.toFile(), Map.of("version", 1, "server", Map.of(
-                "id", "drain-test", "http", Map.of("port", 0), "apiGrpcPort", 0,
+                "id", "drain-test", "http", Map.of("port", 0),
                 "raft", Map.of("port", 0, "electionTimeoutMs", 300, "heartbeatIntervalMs", 100,
                         "storage", Map.of("path", directory.resolve("raft").toString())),
                 "telemetry", Map.of("enabled", false))));
