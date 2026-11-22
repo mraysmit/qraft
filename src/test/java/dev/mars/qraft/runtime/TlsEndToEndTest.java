@@ -57,14 +57,14 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * End-to-end test of transport security (transport security list, Phase 6): three servers with HTTPS, TLS on the
- * API gRPC port and mutual TLS on the Raft port, each requiring a client certificate, and ACLs under {@code deny}.
+ * End-to-end test of transport security (transport security list, Phase 6): three servers with HTTPS and mutual TLS
+ * on the Raft port, each requiring a client certificate, and ACLs under {@code deny}.
  * They elect a leader over mutual TLS and install the management token; a client on one host registers a service
  * over HTTPS, and a client on another discovers it. Plain HTTP reaches none of them.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-11-07
- * @version 1.0
+ * @version 1.1
  */
 @Tag("e2e")
 class TlsEndToEndTest {
@@ -155,14 +155,14 @@ class TlsEndToEndTest {
             httpPorts.add(http);
             Path configuration = root.resolve(id + ".json");
             JSON.writeValue(configuration.toFile(), Map.of("version", 1, "server", Map.of(
-                    "id", id, "http", Map.of("port", http), "apiGrpcPort", freePort(),
+                    "id", id, "http", Map.of("port", http),
                     "raft", Map.of("port", raftPorts.get(id), "nodes", nodes, "electionTimeoutMs", 600,
                             "heartbeatIntervalMs", 150, "storage", Map.of("path", root.resolve(id).toString())),
                     "acl", Map.of("enabled", true, "defaultPolicy", "deny",
                             "initialManagementTokenFile", managementFile.toString()),
                     "tls", Map.of("caFile", fixture("ca.pem").toString(), "certFile", fixture("server.pem").toString(),
                             "keyFile", fixture("server.key").toString(), "https", Map.of("enabled", true),
-                            "grpc", Map.of("enabled", true), "raft", Map.of("enabled", true)),
+                            "raft", Map.of("enabled", true)),
                     "telemetry", Map.of("enabled", false))));
             AppConfig config = AppConfig.fromFile(configuration);
             config.validate();
