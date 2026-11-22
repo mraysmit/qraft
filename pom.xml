@@ -133,7 +133,7 @@
             <version>${jackson.version}</version>
         </dependency>
 
-        <!-- gRPC and protobuf: the Raft transport and the external API services -->
+        <!-- gRPC and protobuf: the Raft transport -->
         <dependency>
             <groupId>io.grpc</groupId>
             <artifactId>grpc-protobuf</artifactId>
@@ -437,7 +437,6 @@
                         <exclude>java/**</exclude>
                         <exclude>com/sun/**</exclude>
                         <exclude>org/jcp/**</exclude>
-                        <exclude>dev/mars/qraft/server/**/grpc/**</exclude>
                         <exclude>dev/mars/qraft/raft/grpc/**</exclude>
                         <exclude>dev/mars/qraft/server/QraftServerApplication*</exclude>
                         <exclude>dev/mars/qraft/server/QraftServerService*</exclude>
