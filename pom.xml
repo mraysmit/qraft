@@ -234,6 +234,15 @@
             <resource>
                 <directory>${project.build.directory}/generated-resources/ui</directory>
             </resource>
+            <!-- Qraft's licence and notice, as META-INF/LICENSE and META-INF/NOTICE of the jar -->
+            <resource>
+                <directory>${project.basedir}</directory>
+                <targetPath>META-INF</targetPath>
+                <includes>
+                    <include>LICENSE</include>
+                    <include>NOTICE</include>
+                </includes>
+            </resource>
         </resources>
 
         <plugins>
@@ -506,6 +515,12 @@
                                 <!-- gRPC and others find their providers through META-INF/services files that
                                      several jars define; they must be merged, not first-one-wins. -->
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
+                                <!-- One NOTICE: Qraft's, then those of the jars it repackages, each as written, which
+                                     the Apache License, section 4(d), asks a redistribution to carry; first-one-wins
+                                     kept one. The Apache notice transformer reorders their lines. -->
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.AppendingTransformer">
+                                    <resource>META-INF/NOTICE</resource>
+                                </transformer>
                             </transformers>
                             <filters>
                                 <filter>

@@ -178,8 +178,8 @@ covers ACLs and tokens, and [docs/CONFIGURATION.md](../docs/CONFIGURATION.md) th
 
 ## The network-test cluster
 
-`compose/docker-compose-network-test.yml` runs the five servers of `config/five-node/` with the `NET_ADMIN`
-capability, and defines two extra networks, `raft-partition-a` and `raft-partition-b`. It also defines a
+`compose/docker-compose-network-test.yml` runs the five servers of `config/five-node/`, and defines two extra
+networks, `raft-partition-a` and `raft-partition-b`. It also defines a
 network monitor, `qraft-network-monitor`, from the image `nicolaka/netshoot:latest`, which joins all three
 networks. The monitor is in the Compose profile `monitoring`, so `start-quick ... network-test` does not
 start it. Start it after the cluster:
@@ -191,6 +191,21 @@ docker exec -it qraft-network-monitor bash
 
 The monitor mounts the host's Docker socket, `/var/run/docker.sock`, which gives anything run in it control
 of the host's Docker engine.
+
+The servers hold no capability to change their own network, and their image has no `tc` or `iptables`. To
+delay or drop a server's traffic, run the tools in a container that joins the server's network namespace and
+holds `NET_ADMIN` itself; the server's container needs nothing:
+
+```sh
+docker run --rm --network container:qraft-server1 --cap-add NET_ADMIN nicolaka/netshoot \
+    tc qdisc add dev eth0 root netem delay 200ms
+docker run --rm --network container:qraft-server1 --cap-add NET_ADMIN nicolaka/netshoot \
+    tc qdisc del dev eth0 root
+```
+
+To cut a server off, disconnect it from the cluster's network and connect it again:
+`docker network disconnect compose_raft-cluster qraft-server1`, then `docker network connect compose_raft-cluster
+qraft-server1`.
 
 ## ACL and TLS clusters
 

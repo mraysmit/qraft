@@ -148,6 +148,44 @@ class DockerDeploymentContractTest {
                 "the image copies its entrypoint from the otherwise excluded docker/ directory");
     }
 
+    /** Qraft's licence and notice go with the image, where Consul's image keeps its licence. */
+    @Test
+    void theImageCarriesQraftsLicenceAndNotice() throws IOException {
+        Path root = Path.of("").toAbsolutePath();
+        String dockerfile = Files.readString(root.resolve("docker/Dockerfile"));
+        assertTrue(dockerfile.contains("COPY LICENSE NOTICE /usr/share/doc/qraft/"), dockerfile);
+        List<String> dockerignoreLines = Files.readString(root.resolve(".dockerignore")).lines().toList();
+        for (String file : List.of("LICENSE", "NOTICE")) {
+            assertFalse(dockerignoreLines.contains(file), ".dockerignore leaves out " + file);
+        }
+    }
+
+    /** The PowerShell starters work from any directory, as the shell starters and the observability starter do. */
+    @Test
+    void thePowerShellStartersNameTheirComposeFilesFromTheirOwnDirectory() throws IOException {
+        Path root = Path.of("").toAbsolutePath();
+        for (String script : List.of("docker/start.ps1", "docker/start-quick.ps1")) {
+            List<String> lines = Files.readString(root.resolve(script)).lines()
+                    .filter(line -> line.contains("compose/docker-compose-")).toList();
+            assertFalse(lines.isEmpty(), script);
+            for (String line : lines) {
+                assertTrue(line.contains("$PSScriptRoot/compose/docker-compose-"),
+                        script + " names a compose file from the caller's directory: " + line.strip());
+            }
+        }
+    }
+
+    /** The servers' image has no tc or iptables; a server needs no capability to change its own network. */
+    @Test
+    void theNetworkTestServersRunWithoutNetAdmin() throws IOException {
+        String compose = Files.readString(Path.of("").toAbsolutePath()
+                .resolve("docker/compose/docker-compose-network-test.yml")).replace("\r\n", "\n");
+        int monitor = compose.indexOf("\n  network-monitor:\n");
+        assertTrue(monitor >= 0, "the network-test file defines the monitor");
+        assertFalse(compose.substring(0, monitor).contains("NET_ADMIN"),
+                "a server of the network-test cluster is given NET_ADMIN");
+    }
+
     /**
      * Code defects list, item 10: every {@code mvn test} reinstalls {@code src/main/ui/node_modules} with {@code npm
      * ci}, so the start scripts, which counted it as a production source, found the jar stale in every Docker stage and

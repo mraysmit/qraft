@@ -38,10 +38,10 @@ function Start-Cluster {
     & (Join-Path $PSScriptRoot "build-runtime.ps1")
     
     $composeFile = switch ($Type) {
-        "3node" { "compose/docker-compose-cluster.yml" }
-        "5node" { "compose/docker-compose-5node.yml" }
-        "network-test" { "compose/docker-compose-network-test.yml" }
-        default { "compose/docker-compose-cluster.yml" }
+        "3node" { "$PSScriptRoot/compose/docker-compose-cluster.yml" }
+        "5node" { "$PSScriptRoot/compose/docker-compose-5node.yml" }
+        "network-test" { "$PSScriptRoot/compose/docker-compose-network-test.yml" }
+        default { "$PSScriptRoot/compose/docker-compose-cluster.yml" }
     }
     
     Write-Host "Starting $Type cluster..." -ForegroundColor Green
@@ -68,10 +68,10 @@ function Stop-Services {
     Write-Host "Stopping all Qraft services..." -ForegroundColor Yellow
     
     # Stop all possible compose configurations
-    docker compose -f compose/docker-compose-single-server.yml down 2>$null
-    docker compose -f compose/docker-compose-cluster.yml down 2>$null
-    docker compose -f compose/docker-compose-5node.yml down 2>$null
-    docker compose -f compose/docker-compose-network-test.yml down 2>$null
+    docker compose -f "$PSScriptRoot/compose/docker-compose-single-server.yml" down 2>$null
+    docker compose -f "$PSScriptRoot/compose/docker-compose-cluster.yml" down 2>$null
+    docker compose -f "$PSScriptRoot/compose/docker-compose-5node.yml" down 2>$null
+    docker compose -f "$PSScriptRoot/compose/docker-compose-network-test.yml" down 2>$null
     
     Write-Host "All services stopped." -ForegroundColor Green
 }
@@ -80,10 +80,10 @@ function Clean-Environment {
     Write-Host "Removing Qraft's containers, networks, and data volumes..." -ForegroundColor Yellow
 
     # Only what these compose files define. Other projects' volumes and networks are left alone.
-    docker compose -f compose/docker-compose-single-server.yml down -v 2>$null
-    docker compose -f compose/docker-compose-cluster.yml down -v 2>$null
-    docker compose -f compose/docker-compose-5node.yml down -v 2>$null
-    docker compose -f compose/docker-compose-network-test.yml down -v 2>$null
+    docker compose -f "$PSScriptRoot/compose/docker-compose-single-server.yml" down -v 2>$null
+    docker compose -f "$PSScriptRoot/compose/docker-compose-cluster.yml" down -v 2>$null
+    docker compose -f "$PSScriptRoot/compose/docker-compose-5node.yml" down -v 2>$null
+    docker compose -f "$PSScriptRoot/compose/docker-compose-network-test.yml" down -v 2>$null
 
     Write-Host "Environment cleaned." -ForegroundColor Green
 }

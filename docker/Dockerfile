@@ -7,6 +7,7 @@ RUN apk add --no-cache curl tzdata bash \
 WORKDIR /app
 COPY target/qraft.jar /app/qraft.jar
 COPY docker/docker-entrypoint.sh /docker-entrypoint.sh
+COPY LICENSE NOTICE /usr/share/doc/qraft/
 RUN chmod +x /docker-entrypoint.sh
 RUN mkdir -p /app/logs /app/data \
     && chown -R qraft:qraft /app

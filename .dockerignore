@@ -39,10 +39,8 @@ docker/
 # Scripts
 scripts/
 
-# Root-level files not needed for builds
+# Root-level files not needed for builds; the image keeps LICENSE and NOTICE in /usr/share/doc/qraft/
 *.json
-LICENSE
-NOTICE
 OPEN_SOURCE_USAGE.md
 
 # npm dependencies of the administrative interface

@@ -1,5 +1,6 @@
-# Advanced Network Testing Configuration for Qraft Server Cluster
-# This configuration supports dynamic network partitioning and realistic network conditions
+# Five servers for network experiments, with two spare networks for partitions.
+# The servers hold no capability to change their own network, and their image has no tc or iptables:
+# shape a server's traffic from a container in its network namespace, as docker/README.md shows.
 
 services:
   server1:
@@ -16,8 +17,6 @@ services:
     volumes:
       - ../config/five-node/server1.json:/etc/qraft/server.json:ro
       - server1-data:/app/data
-    cap_add:
-      - NET_ADMIN  # Required for network manipulation (tc, iptables)
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health/live"]
       interval: 10s
@@ -40,8 +39,6 @@ services:
     volumes:
       - ../config/five-node/server2.json:/etc/qraft/server.json:ro
       - server2-data:/app/data
-    cap_add:
-      - NET_ADMIN
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health/live"]
       interval: 10s
@@ -64,8 +61,6 @@ services:
     volumes:
       - ../config/five-node/server3.json:/etc/qraft/server.json:ro
       - server3-data:/app/data
-    cap_add:
-      - NET_ADMIN
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health/live"]
       interval: 10s
@@ -88,8 +83,6 @@ services:
     volumes:
       - ../config/five-node/server4.json:/etc/qraft/server.json:ro
       - server4-data:/app/data
-    cap_add:
-      - NET_ADMIN
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health/live"]
       interval: 10s
@@ -112,8 +105,6 @@ services:
     volumes:
       - ../config/five-node/server5.json:/etc/qraft/server.json:ro
       - server5-data:/app/data
-    cap_add:
-      - NET_ADMIN
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health/live"]
       interval: 10s

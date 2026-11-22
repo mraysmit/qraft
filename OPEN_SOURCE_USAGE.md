@@ -1,6 +1,6 @@
 # Open source usage
 
-**Last updated:** 2026-11-21
+**Last updated:** 2026-11-22
 
 ## Qraft's licence
 
@@ -78,14 +78,15 @@ These are used to build and test Qraft. None of them is in the jar.
 The tables above list what Qraft declares directly. A distribution must account for everything it actually
 contains.
 
-1. **Ship Qraft's `LICENSE` and `NOTICE`.** The build does not copy them into `target/qraft.jar`, and
-   `.dockerignore` leaves them out of the Docker build context, so add them to the distribution yourself.
+1. **Qraft's `LICENSE` and `NOTICE` ship with the build.** `target/qraft.jar` holds them as `META-INF/LICENSE`
+   and `META-INF/NOTICE`, and an image built from `docker/Dockerfile` also in `/usr/share/doc/qraft/`.
 2. **Inventory the shaded Java tree.** Resolve the production dependencies with
    `mvn dependency:tree -Dscope=runtime` and compare the list with the contents of `target/qraft.jar`.
    Collect the licence and `NOTICE` files of every artifact in it, transitive ones included.
-3. **Check `META-INF` in the jar.** The shade step merges the `META-INF` directories of all those jars and
-   keeps one copy of a file that several of them contain, so the jar's own `LICENSE` and `NOTICE` files do not
-   cover every artifact. Supply the missing texts separately.
+3. **Check `META-INF` in the jar.** The shade step merges the `META-INF` directories of all those jars.
+   `META-INF/NOTICE` is Qraft's notice followed by the `META-INF/NOTICE` of each jar that has one, as written.
+   Of any other file that several jars contain, licence files included, it keeps one copy: `META-INF/LICENSE` is
+   Qraft's, so the jar does not carry every artifact's licence text. Supply the missing texts separately.
 4. **Choose and meet the terms of the dual-licensed libraries.** Logback is offered under EPL 2.0 or
    LGPL 2.1, and the annotations API under CDDL or GPLv2 with Classpath Exception. Record the licence you
    take and meet its conditions.
