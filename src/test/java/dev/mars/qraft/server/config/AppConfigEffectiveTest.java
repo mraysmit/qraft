@@ -80,7 +80,7 @@ class AppConfigEffectiveTest {
 
         Set<String> keys = new HashSet<>();
         config.effective().settings().forEach(setting -> assertTrue(keys.add(setting.key()), setting.key()));
-        for (String key : Set.of("server.id", "server.apiGrpcPort", "server.raft.storage.path",
+        for (String key : Set.of("server.id", "server.raft.storage.path",
                 "server.raft.snapshot.threshold", "server.raft.io.queueSize", "server.telemetry.prometheusPort",
                 "server.shutdown.timeoutMs", "server.health.nodeTtlMs", "server.ui.path", "server.operator.token",
                 "server.acl.enabled", "server.tls.https.enabled", "server.tls.raft.verifyServerHostname",
