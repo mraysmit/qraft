@@ -28,32 +28,30 @@ import org.junit.jupiter.api.io.TempDir;
 import javax.net.ssl.SSLParameters;
 import javax.net.ssl.SSLSocket;
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
 import java.net.InetSocketAddress;
-import java.net.Socket;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
- * Tests that a server started from a document with {@code server.tls} serves HTTPS on its HTTP listener and TLS on
- * its API gRPC port, each requiring a client certificate (transport security list, Phase 2).
+ * Tests that a server started from a document with {@code server.tls} serves HTTPS on its HTTP listener and mutual
+ * TLS on its Raft port, each requiring a client certificate (transport security list, Phase 2), and that these are
+ * the only listeners it opens: the API gRPC listener is retired.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-11-07
- * @version 1.0
+ * @version 1.1
  */
 class QraftServerTlsStartupTest {
     private static final ObjectMapper JSON = new ObjectMapper();
@@ -84,12 +82,12 @@ class QraftServerTlsStartupTest {
     private Map<String, InetSocketAddress> start() throws Exception {
         Path configuration = directory.resolve("server.json");
         JSON.writeValue(configuration.toFile(), Map.of("version", 1, "server", Map.of(
-                "id", "tls-startup", "http", Map.of("port", 0), "apiGrpcPort", 0,
+                "id", "tls-startup", "http", Map.of("port", 0),
                 "raft", Map.of("port", 0, "electionTimeoutMs", 300, "heartbeatIntervalMs", 100,
                         "storage", Map.of("path", directory.resolve("raft").toString())),
                 "tls", Map.of("caFile", fixture("ca.pem").toString(), "certFile", fixture("server.pem").toString(),
                         "keyFile", fixture("server.key").toString(),
-                        "https", Map.of("enabled", true), "grpc", Map.of("enabled", true),
+                        "https", Map.of("enabled", true),
                         "raft", Map.of("enabled", true)),
                 "telemetry", Map.of("enabled", false))));
         AppConfig config = AppConfig.fromFile(configuration);
@@ -154,33 +152,12 @@ class QraftServerTlsStartupTest {
         }
     }
 
+    /**
+     * The API gRPC listener served only the gRPC {@code DistributedStateService}, which is retired: no client used
+     * it, it did not forward to the leader and its writes were not audited.
+     */
     @Test
-    void theApiGrpcPortServesTls() throws Exception {
-        int port = start().get("apiGrpc").getPort();
-        TlsMaterial client = client();
-
-        try (SSLSocket socket = (SSLSocket) client.clientContext().getSocketFactory().createSocket("localhost", port)) {
-            SSLParameters parameters = client.clientParameters(true);
-            parameters.setApplicationProtocols(new String[] {"h2"});
-            socket.setSSLParameters(parameters);
-            socket.setSoTimeout(5_000);
-            socket.startHandshake();
-            assertEquals("h2", socket.getApplicationProtocol(), "a TLS handshake that negotiated HTTP/2");
-        }
-        try (Socket plain = new Socket("localhost", port)) {
-            plain.setSoTimeout(5_000);
-            OutputStream out = plain.getOutputStream();
-            out.write("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n".getBytes(StandardCharsets.US_ASCII));
-            out.flush();
-            InputStream in = plain.getInputStream();
-            byte[] answer;
-            try {
-                answer = in.readNBytes(9);
-            } catch (IOException closed) {
-                answer = new byte[0];
-            }
-            assertEquals(false, answer.length == 9 && answer[3] == 0x04,
-                    "a plaintext HTTP/2 preface gets no SETTINGS frame back");
-        }
+    void aServerOpensOnlyItsHttpAndRaftListeners() throws Exception {
+        assertEquals(Set.of("http", "raft"), start().keySet());
     }
 }
