@@ -16,7 +16,6 @@
 
 package dev.mars.qraft.raft;
 
-import dev.mars.qraft.common.tls.ServerTls;
 import dev.mars.qraft.common.tls.TlsMaterial;
 import io.grpc.netty.GrpcSslContexts;
 import io.netty.handler.ssl.ClientAuth;
@@ -33,19 +32,18 @@ import java.security.cert.CertificateException;
 import java.security.cert.X509Certificate;
 
 /**
- * Netty TLS contexts for Qraft's gRPC listeners and channels, built from {@link TlsMaterial} (transport security
+ * Netty TLS contexts for the Raft port's listener and channels, built from {@link TlsMaterial} (transport security
  * list, Phases 2 and 5). The JDK's TLS is used, so the versions and the trust are the material's own.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-11-07
- * @version 1.0
+ * @version 1.1
  */
 public final class GrpcTls {
     private GrpcTls() { }
 
-    /** A listener's context: its certificate, the CA, and whether a caller must present a certificate. */
-    public static SslContext serverContext(ServerTls tls) {
-        TlsMaterial material = tls.material();
+    /** The Raft listener's context: its certificate, the CA, and a certificate required of every caller. */
+    public static SslContext serverContext(TlsMaterial material) {
         try {
             SslContextBuilder builder = SslContextBuilder.forServer(material.keyManager().orElseThrow(
                             () -> new IllegalStateException(material.settings().location()
@@ -53,7 +51,7 @@ public final class GrpcTls {
                     .sslProvider(SslProvider.JDK)
                     .trustManager(material.trustManager())
                     .protocols(material.settings().protocols())
-                    .clientAuth(tls.requireClientCertificate() ? ClientAuth.REQUIRE : ClientAuth.NONE);
+                    .clientAuth(ClientAuth.REQUIRE);
             return GrpcSslContexts.configure(builder, SslProvider.JDK).build();
         } catch (SSLException e) {
             throw new IllegalStateException(material.settings().location() + " cannot serve gRPC TLS: "
@@ -132,20 +130,6 @@ public final class GrpcTls {
         @Override
         public X509Certificate[] getAcceptedIssuers() {
             return delegate.getAcceptedIssuers();
-        }
-    }
-
-    /** A channel's context: the CA, and this side's certificate when the material has one. */
-    public static SslContext clientContext(TlsMaterial material) {
-        try {
-            SslContextBuilder builder = GrpcSslContexts.configure(SslContextBuilder.forClient(), SslProvider.JDK)
-                    .trustManager(material.trustManager())
-                    .protocols(material.settings().protocols());
-            material.keyManager().ifPresent(builder::keyManager);
-            return builder.build();
-        } catch (SSLException e) {
-            throw new IllegalStateException(material.settings().location() + " cannot call gRPC over TLS: "
-                    + e.getMessage(), e);
         }
     }
 }
