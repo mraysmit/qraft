@@ -65,7 +65,7 @@ import java.util.concurrent.TimeUnit;
  * Handles incoming RequestVote and AppendEntries RPC calls from peer nodes.
  * 
  * @author Mark Andrew Ray-Smith Cityline Ltd
- * @version 1.0
+ * @version 1.1
  * @since 2026-01-08
  */
 public class GrpcRaftServer {
@@ -168,8 +168,8 @@ public class GrpcRaftServer {
         blockingTasks.execute(() -> {
             try {
             ServerBuilder<?> builder = (tls.isPresent()
-                    ? io.grpc.netty.NettyServerBuilder.forPort(port).sslContext(GrpcTls.serverContext(
-                            new dev.mars.qraft.common.tls.ServerTls(tls.get().material(), true)))
+                    ? io.grpc.netty.NettyServerBuilder.forPort(port)
+                            .sslContext(GrpcTls.serverContext(tls.get().material()))
                     : ServerBuilder.forPort(port))
                 .permitKeepAliveTime(PERMITTED_KEEPALIVE_TIME.toNanos(), TimeUnit.NANOSECONDS)
                 .permitKeepAliveWithoutCalls(true)
