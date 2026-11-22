@@ -137,7 +137,7 @@ class DnsEndToEndTest {
 
         Path serverConfig = directory.resolve("server.json");
         JSON.writeValue(serverConfig.toFile(), Map.of("version", 1, "server", Map.of(
-                "id", "dns-e2e", "http", Map.of("host", "127.0.0.1", "port", 0), "apiGrpcPort", 0,
+                "id", "dns-e2e", "http", Map.of("host", "127.0.0.1", "port", 0),
                 "raft", Map.of("port", 0, "electionTimeoutMs", 500, "heartbeatIntervalMs", 50,
                         "storage", Map.of("path", directory.resolve("raft").toString())),
                 "health", Map.of("expiryIntervalMs", 50),
