@@ -1,6 +1,6 @@
 # Qraft
 
-**Last updated:** 2026-11-21
+**Last updated:** 2026-11-22
 
 Qraft is a service discovery and coordination platform in the style of Consul, written in Java 27 and built
 on Raft consensus. A cluster of servers replicates every change through a Raft log and applies it in the
@@ -21,8 +21,7 @@ command-line tools and an embedded administrative interface.
 - **Auth methods.** `jwt` and `kubernetes` auth methods with binding rules, and login and logout that
   exchange an external credential for a Qraft token.
 - **Audit file.** An optional audit log written to a rotated file.
-- **TLS.** HTTPS, TLS for the gRPC API, and mutual TLS between servers on the Raft port, with certificate
-  reloading.
+- **TLS.** HTTPS, and mutual TLS between servers on the Raft port, with certificate reloading.
 - **Key/value store.** Reads, recursive reads, key listings, writes with check-and-set, and deletes.
 - **Consistency modes and blocking queries.** Default, `consistent` and `stale` reads, and blocking queries
   that wait on an index.
@@ -48,7 +47,7 @@ the layers apart:
 | Replicated state | `dev.mars.qraft.state` | Deterministic commands and the state they build: catalog, ACLs, key/value, sessions, tenants and namespaces. |
 | Common | `dev.mars.qraft.common` | Shared domain types, configuration loading, the ACL rule model, DNS, TLS material, events, and executors. |
 | Client | `dev.mars.qraft.client` | Client mode: registration, anti-entropy, local checks, the local API, client-side ACLs and DNS. It also holds the Java client library, `dev.mars.qraft.client.api`, with `QraftApi`, `KeyValue`, `Sessions` and `LeaderElection`. |
-| Server | `dev.mars.qraft.server` | Server mode: the HTTP and gRPC APIs, ACL resolution and auth methods, health processing, telemetry, the administrative interface, and offline recovery. |
+| Server | `dev.mars.qraft.server` | Server mode: the HTTP API, ACL resolution and auth methods, health processing, telemetry, the administrative interface, and offline recovery. |
 | Runtime | `dev.mars.qraft.runtime` | The entry point, `QraftRuntimeApplication`. It starts server or client mode, or runs the `operator`, `kv` and `acl` commands. |
 
 Section 1.1 of [the design](docs-design/QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md) lists the packages
@@ -125,7 +124,6 @@ To run clusters in Docker, see [docker/README.md](docker/README.md).
 |---|---|---|
 | 8080 | Server HTTP API, health and the administrative interface at `/ui/`; a client's local API | `server.http.port`; `client.httpPort` |
 | 9080 | Raft traffic between servers | `server.raft.port` |
-| 10080 | Server gRPC API | `server.apiGrpcPort` |
 | 8600 | DNS, UDP and TCP, when a `dns` section is configured | `server.dns.port`; `client.dns.port` |
 | 9464 | Prometheus metrics, when telemetry is enabled | `server.telemetry.prometheusPort` |
 
