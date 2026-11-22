@@ -24,24 +24,24 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Tests the rules for a server's listening ports. Port 0 asks the system for any free port. The HTTP and
- * API gRPC ports may always be 0. The Raft port may be 0 only on a server that is its cluster's sole
- * member, because peers dial the configured Raft address. Two zeros never clash, but two equal nonzero
- * ports do, and ports outside 0 to 65535 are invalid.
+ * Tests the rules for a server's listening ports. Port 0 asks the system for any free port. The HTTP port may
+ * always be 0. The Raft port may be 0 only on a server that is its cluster's sole member, because peers dial the
+ * configured Raft address. Two zeros never clash, but two equal nonzero ports do, and ports outside 0 to 65535 are
+ * invalid. The API gRPC listener is retired, and its port is no longer a setting.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-28
- * @version 1.0
+ * @version 1.1
  */
 class AppConfigPortTest {
 
     @Test
     void everyPortMayBeZeroOnASoleMember() {
         assertValid("""
-                {"version":1,"server":{"id":"solo","http":{"port":0},"apiGrpcPort":0,"raft":{"port":0}}}
+                {"version":1,"server":{"id":"solo","http":{"port":0},"raft":{"port":0}}}
                 """);
         assertValid("""
-                {"version":1,"server":{"id":"solo","http":{"port":0},"apiGrpcPort":0,
+                {"version":1,"server":{"id":"solo","http":{"port":0},
                  "raft":{"port":0,"nodes":{"solo":"127.0.0.1:0"}}}}
                 """);
     }
@@ -53,7 +53,7 @@ class AppConfigPortTest {
                 """));
         assertTrue(failure.getMessage().contains("server.raft.port"), failure.getMessage());
         assertValid("""
-                {"version":1,"server":{"id":"a","http":{"port":0},"apiGrpcPort":0,
+                {"version":1,"server":{"id":"a","http":{"port":0},
                  "raft":{"port":9080,"nodes":{"a":"a:9080","b":"b:9080"}}}}
                 """);
     }
@@ -61,13 +61,10 @@ class AppConfigPortTest {
     @Test
     void equalNonzeroPortsClashButZerosDoNot() {
         assertValid("""
-                {"version":1,"server":{"id":"solo","http":{"port":0},"apiGrpcPort":0,"raft":{"port":9080}}}
+                {"version":1,"server":{"id":"solo","http":{"port":0},"raft":{"port":9080}}}
                 """);
         assertThrows(IllegalStateException.class, () -> validate("""
-                {"version":1,"server":{"id":"solo","http":{"port":9080},"apiGrpcPort":10080,"raft":{"port":9080}}}
-                """));
-        assertThrows(IllegalStateException.class, () -> validate("""
-                {"version":1,"server":{"id":"solo","http":{"port":8080},"apiGrpcPort":8080,"raft":{"port":0}}}
+                {"version":1,"server":{"id":"solo","http":{"port":9080},"raft":{"port":9080}}}
                 """));
     }
 
@@ -91,11 +88,6 @@ class AppConfigPortTest {
                 """));
         assertEquals("server.raft.port and server.dns.port are both 8600: each listener needs its own port",
                 dns.getMessage());
-        IllegalStateException grpc = assertThrows(IllegalStateException.class, () -> validate("""
-                {"version":1,"server":{"id":"solo","apiGrpcPort":8600,"dns":{"port":8600}}}
-                """));
-        assertEquals("server.apiGrpcPort and server.dns.port are both 8600: each listener needs its own port",
-                grpc.getMessage());
         assertValid("""
                 {"version":1,"server":{"id":"solo","http":{"port":0},"dns":{"port":0}}}
                 """);
@@ -107,14 +99,27 @@ class AppConfigPortTest {
                 {"version":1,"server":{"id":"solo","http":{"port":-1}}}
                 """));
         assertThrows(IllegalStateException.class, () -> validate("""
-                {"version":1,"server":{"id":"solo","apiGrpcPort":65536}}
+                {"version":1,"server":{"id":"solo","http":{"port":65536}}}
                 """));
         assertThrows(IllegalStateException.class, () -> validate("""
                 {"version":1,"server":{"id":"solo","raft":{"port":-1}}}
                 """));
         assertValid("""
-                {"version":1,"server":{"id":"solo","http":{"port":65535},"apiGrpcPort":1,"raft":{"port":2}}}
+                {"version":1,"server":{"id":"solo","http":{"port":65535},"raft":{"port":2}}}
                 """);
+    }
+
+    /**
+     * The API gRPC listener served only the gRPC {@code DistributedStateService}, which is retired: no client used it,
+     * it did not forward to the leader and its writes were not audited. A document that still sets its port is
+     * refused, as every unknown setting is, rather than accepted and ignored.
+     */
+    @Test
+    void theRetiredApiGrpcPortIsRefused() {
+        IllegalArgumentException refused = assertThrows(IllegalArgumentException.class, () -> AppConfig.fromJson("""
+                {"version":1,"server":{"id":"solo","apiGrpcPort":10080}}
+                """));
+        assertEquals("Unknown server setting: apiGrpcPort", refused.getMessage());
     }
 
     private static void assertValid(String document) {
