@@ -108,7 +108,7 @@ class QraftServerLifecycleTest {
 
     private void assertStartedPolicy(String raftSettings, RaftMembershipPolicy expected) throws Exception {
         AppConfig configuration = AppConfig.fromJson("""
-                {"version":1,"server":{"id":"policy-server","http":{"port":0},"apiGrpcPort":0,
+                {"version":1,"server":{"id":"policy-server","http":{"port":0},
                   "telemetry":{"enabled":false},"raft":{"port":0,"snapshot":{"enabled":false},
                   "storage":{"path":"%s"},%s}}}
                 """.formatted(temporaryDirectory.resolve("raft").toString().replace('\\', '/'), raftSettings));
@@ -345,7 +345,7 @@ class QraftServerLifecycleTest {
         if (membershipJson != null) raft.put("membership", JSON.readTree(membershipJson));
         Path configuration = temporaryDirectory.resolve("membership-server.json");
         JSON.writeValue(configuration.toFile(), Map.of("version", 1, "server", Map.of(
-                "id", "membership-wiring", "http", Map.of("port", 0), "apiGrpcPort", 0,
+                "id", "membership-wiring", "http", Map.of("port", 0),
                 "raft", raft, "operator", Map.of("token", OPERATOR_TOKEN),
                 "telemetry", Map.of("enabled", false))));
         AppConfig config = AppConfig.fromFile(configuration);
