@@ -120,7 +120,7 @@ class RuntimeLoggingTest {
             Map<String, Object> config = mode.equals("server")
                     ? Map.of("version", 1, "logging", Map.of("directory", directory.toString()),
                         "server", Map.of("id", "logging-fixture",
-                            "http", Map.of("host", "127.0.0.1", "port", 0), "apiGrpcPort", 0,
+                            "http", Map.of("host", "127.0.0.1", "port", 0),
                             "raft", Map.of("port", 0, "storage", Map.of("path", retained.resolve("raft").toString())),
                             "telemetry", Map.of("enabled", false)))
                     : Map.of("version", 1, "logging", Map.of("directory", directory.toString()),
