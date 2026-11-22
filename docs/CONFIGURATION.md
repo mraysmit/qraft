@@ -1,6 +1,6 @@
 # Qraft Configuration Reference
 
-**Last updated:** 2026-11-21
+**Last updated:** 2026-11-22
 
 This is the complete reference for the configuration file of a Qraft process in
 server mode and in client mode. Every key, default and rule here comes from the
@@ -105,7 +105,6 @@ Durations are integers in milliseconds unless the key says otherwise
 | Key | Type | Default | Rules | Meaning |
 |---|---|---|---|---|
 | `id` | string | the host name, or `node-<pid>` if the host name cannot be read | Required when `server.raft.nodes` lists more than one server: `server.id is required for a multi-node cluster`. When `server.raft.nodes` is given, it must be one of its keys, checked with the rest of the configuration, before storage opens: `server.id '<id>' is not a key of server.raft.nodes, which lists: <names>`. Blank is treated as absent. | The server's name in the cluster. A server that takes the host name logs a warning. |
-| `apiGrpcPort` | integer | `10080` | 0 to 65535; 0 takes any free port. Must differ from the other listeners' ports (below). | Port of the API gRPC listener. |
 | `http` | object | | | See 2.2. |
 | `raft` | object | | | See 2.3 to 2.8. |
 | `health` | object | | | See 2.9. |
@@ -119,13 +118,18 @@ Durations are integers in milliseconds unless the key says otherwise
 | `audit` | object | | | See 2.17. |
 | `dns` | object | absent: no DNS | | See 2.18. |
 
-The HTTP listener binds `server.http.host`. The API gRPC and Raft listeners
-listen on every interface; no setting chooses their address.
+The HTTP listener binds `server.http.host`. The Raft listener listens on every
+interface; no setting chooses its address.
 
-No two listeners may share a port other than 0: HTTP, Raft, API gRPC, the
-Prometheus port while telemetry is enabled, and the DNS port, which serves TCP
-as well as UDP, when DNS is on. The refusal names both settings, for example
+No two listeners may share a port other than 0: HTTP, Raft, the Prometheus
+port while telemetry is enabled, and the DNS port, which serves TCP as well as
+UDP, when DNS is on. The refusal names both settings, for example
 `server.http.port and server.raft.port are both 8080: each listener needs its own port`.
+
+There is no API gRPC listener. `server.apiGrpcPort` and `server.tls.grpc` belonged
+to the gRPC `DistributedStateService`, which is retired, and a document that
+still sets one is refused like any unknown setting:
+`Unknown server setting: apiGrpcPort`, `Unknown server.tls setting: grpc`.
 
 ### 2.2 `server.http`
 
@@ -239,7 +243,7 @@ The embedded admin interface, served by the HTTP listener.
 
 | Key | Type | Default | Rules | Meaning |
 |---|---|---|---|---|
-| `enabled` | boolean | `false` | | Whether ACLs are enforced on the HTTP API, the API gRPC listener and removals. |
+| `enabled` | boolean | `false` | | Whether ACLs are enforced on the HTTP API and removals. |
 | `defaultPolicy` | string | none | `allow` or `deny`. Required when `enabled` is true: `server.acl.defaultPolicy must be set when ACLs are enabled: allow or deny`. | The decision for a request that no rule covers. |
 | `initialManagementTokenFile` | string | none | Blank is treated as absent. Needs `enabled` true. The file is read when the configuration is checked, and its trimmed content must be a UUID outside the range kept for built-ins (`00000000-0000-0000-0000-0000000000xx`). | Whenever this server becomes leader and no token has this secret, it installs a management token with the `global-management` policy. The secret is never logged. |
 
@@ -268,12 +272,10 @@ start, checked every 30 seconds, and reloaded when one changes.
 | `minVersion` | string | `"TLSv1.2"` | `TLSv1.2` or `TLSv1.3`. | The lowest TLS version accepted. `TLSv1.2` allows 1.3 and 1.2. |
 | `https.enabled` | boolean | `false` | | The HTTP listener serves HTTPS only. |
 | `https.verifyIncoming` | boolean | `true` | | HTTPS requires a client certificate. |
-| `grpc.enabled` | boolean | `false` | | The API gRPC listener uses TLS. |
-| `grpc.verifyIncoming` | boolean | `true` | | The API gRPC listener requires a client certificate. |
 | `raft.enabled` | boolean | `false` | | The Raft port uses mutual TLS. |
 | `raft.verifyServerHostname` | boolean | `true` | | A peer's certificate must name the host this server dialled. |
 
-`https`, `grpc` and `raft` are objects. They accept only the keys shown.
+`https` and `raft` are objects. They accept only the keys shown.
 
 ### 2.17 `server.audit`
 
@@ -476,7 +478,6 @@ server with DNS on port 8600 and telemetry off.
   "server": {
     "id": "server-dev",
     "http": { "host": "0.0.0.0", "port": 8080 },
-    "apiGrpcPort": 10080,
     "raft": {
       "port": 9080,
       "nodes": { "server-dev": "server:9080" },
