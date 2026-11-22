@@ -159,7 +159,7 @@ class WriteForwardingEndToEndTest {
             httpPorts.add(http);
             Path configuration = root.resolve(id + ".json");
             JSON.writeValue(configuration.toFile(), Map.of("version", 1, "server", Map.of(
-                    "id", id, "http", Map.of("port", http), "apiGrpcPort", freePort(),
+                    "id", id, "http", Map.of("port", http),
                     "raft", Map.of("port", raftPorts.get(id), "nodes", nodes, "electionTimeoutMs", 600,
                             "heartbeatIntervalMs", 150, "storage", Map.of("path", root.resolve(id).toString())),
                     "acl", Map.of("enabled", true, "defaultPolicy", "deny",
