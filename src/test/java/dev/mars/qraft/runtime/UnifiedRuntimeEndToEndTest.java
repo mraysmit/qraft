@@ -87,13 +87,13 @@ class UnifiedRuntimeEndToEndTest {
         // server's URL, and a restarted server must answer there.
         Path serverConfig = temporaryDirectory.resolve("server.json");
         Path clientConfig = temporaryDirectory.resolve("client.json");
-        writeServerConfig(serverConfig, temporaryDirectory.resolve("raft-first"), 0, 0, 0);
+        writeServerConfig(serverConfig, temporaryDirectory.resolve("raft-first"), 0, 0);
 
         RuntimeLifecycle firstServer = launch("server", serverConfig);
         Map<String, Integer> serverPorts = firstServer.boundPorts();
         int httpPort = serverPorts.get("http");
-        assertEquals(Set.of("http", "raft", "apiGrpc"), serverPorts.keySet());
-        assertEquals(3, Set.copyOf(serverPorts.values()).size(), "each listener has its own port");
+        assertEquals(Set.of("http", "raft"), serverPorts.keySet());
+        assertEquals(2, Set.copyOf(serverPorts.values()).size(), "each listener has its own port");
         assertTrue(serverPorts.values().stream().allMatch(port -> port > 0), serverPorts.toString());
         URI server = URI.create("http://127.0.0.1:" + httpPort);
         await(() -> status(server.resolve("/health/ready")) == 200);
@@ -121,8 +121,7 @@ class UnifiedRuntimeEndToEndTest {
         await(() -> status(clientUri.resolve("/health/ready")) == 503);
 
         assertPortAvailable(serverPorts.get("raft"));
-        assertPortAvailable(serverPorts.get("apiGrpc"));
-        writeServerConfig(serverConfig, temporaryDirectory.resolve("raft-restarted"), httpPort, 0, 0);
+        writeServerConfig(serverConfig, temporaryDirectory.resolve("raft-restarted"), httpPort, 0);
         RuntimeLifecycle restartedServer = launch("server", serverConfig);
         Map<String, Integer> restartedPorts = restartedServer.boundPorts();
         assertEquals(httpPort, restartedPorts.get("http"), "a configured nonzero port is bound as given");
@@ -210,15 +209,13 @@ class UnifiedRuntimeEndToEndTest {
         }
     }
 
-    private void writeServerConfig(Path target, Path storage, int httpPort,
-                                   int raftPort, int apiGrpcPort) throws Exception {
+    private void writeServerConfig(Path target, Path storage, int httpPort, int raftPort) throws Exception {
         String document = """
                 {
                   "version": 1,
                   "server": {
                     "id": "runtime-node",
                     "http": {"host": "127.0.0.1", "port": %d},
-                    "apiGrpcPort": %d,
                     "raft": {
                       "port": %d,
                       "nodes": {"runtime-node": "127.0.0.1:%d"},
@@ -234,7 +231,7 @@ class UnifiedRuntimeEndToEndTest {
                   },
                   "logging": {"directory": %s}
                 }
-                """.formatted(httpPort, apiGrpcPort, raftPort, raftPort,
+                """.formatted(httpPort, raftPort, raftPort,
                 JSON.writeValueAsString(storage.toString()),
                 JSON.writeValueAsString(temporaryDirectory.resolve("logs").toString()));
         Files.writeString(target, document);
