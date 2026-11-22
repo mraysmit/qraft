@@ -102,7 +102,7 @@ class QraftServerTlsReloadTest {
         Files.copy(QraftServerTlsStartupTest.fixture("server.key"), key);
         Path configuration = directory.resolve("server.json");
         JSON.writeValue(configuration.toFile(), Map.of("version", 1, "server", Map.of(
-                "id", "tls-reload", "http", Map.of("port", 0), "apiGrpcPort", 0,
+                "id", "tls-reload", "http", Map.of("port", 0),
                 "raft", Map.of("port", 0, "electionTimeoutMs", 300, "heartbeatIntervalMs", 100,
                         "storage", Map.of("path", directory.resolve("raft").toString())),
                 "tls", Map.of("caFile", ca.toString(), "certFile", cert.toString(), "keyFile", key.toString(),
