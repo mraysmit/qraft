@@ -16,7 +16,13 @@
 
 package dev.mars.qraft.common.dns;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
+import dev.mars.qraft.testing.LogCapturesHelper;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -326,6 +332,31 @@ class DnsResolverTest {
         assertNegative(resolve("odd.service.qraft", DnsCodec.TYPE_A), DnsCodec.NXDOMAIN);
         answers.put("/v1/health/service/garbled", new DnsReads.Read(200, "not json"));
         assertEquals(DnsCodec.SERVFAIL, resolve("garbled.service.qraft", DnsCodec.TYPE_A).rcode());
+    }
+
+    // Jackson's message carries the location on a second line, " at [Source: ...]", which reads as a stack frame.
+    @Test
+    void aReadThatIsNotJsonIsLoggedOnOneLineWithItsReason() throws Exception {
+        answers.put("/v1/health/service/garbled", new DnsReads.Read(200, "not json"));
+        Logger logger = (Logger) LoggerFactory.getLogger(DnsResolver.class);
+        Level level = logger.getLevel();
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.setLevel(Level.DEBUG);
+        logger.addAppender(appender);
+        try {
+            assertEquals(DnsCodec.SERVFAIL, resolve("garbled.service.qraft", DnsCodec.TYPE_A).rcode());
+        } finally {
+            logger.detachAppender(appender);
+            logger.setLevel(level);
+        }
+
+        List<String> lines = LogCapturesHelper.snapshot(appender).stream()
+                .map(ILoggingEvent::getFormattedMessage)
+                .filter(message -> message.contains("was not JSON")).toList();
+        assertEquals(1, lines.size(), lines.toString());
+        assertFalse(lines.getFirst().contains("\n"), lines.getFirst());
+        assertTrue(lines.getFirst().contains("Unrecognized token 'not'"), lines.getFirst());
     }
 
     @Test

@@ -16,6 +16,7 @@
 
 package dev.mars.qraft.common.dns;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -53,7 +54,7 @@ import java.util.random.RandomGenerator;
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-11-09
- * @version 1.0
+ * @version 1.1
  */
 public final class DnsResolver {
     private static final Logger LOG = LoggerFactory.getLogger(DnsResolver.class);
@@ -231,12 +232,17 @@ public final class DnsResolver {
                     try {
                         body = JSON.readTree(read.get().body());
                     } catch (java.io.IOException notJson) {
-                        LOG.debug("A DNS lookup's read of {} was not JSON: {}", path, notJson.getMessage());
+                        LOG.debug("A DNS lookup's read of {} was not JSON: {}", path, oneLine(notJson));
                         return DnsAnswer.of(DnsCodec.SERVFAIL);
                     }
                     if (body == null || !body.isArray()) return DnsAnswer.of(DnsCodec.SERVFAIL);
                     return answer.apply(body);
                 });
+    }
+
+    /** Why a body was not JSON, on one line: Jackson's message adds the location on a second, " at [Source: ...]". */
+    private static String oneLine(java.io.IOException notJson) {
+        return notJson instanceof JsonProcessingException parse ? parse.getOriginalMessage() : notJson.getMessage();
     }
 
     private static boolean hasTag(JsonNode tags, String tag) {
