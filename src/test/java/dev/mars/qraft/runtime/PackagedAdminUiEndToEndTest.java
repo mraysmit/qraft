@@ -564,13 +564,13 @@ class PackagedAdminUiEndToEndTest {
     private static String serverConfig(Path run, int httpPort, String ui) throws IOException {
         return """
                 {"version": 1,
-                 "server": {"id": "packaged-server", "http": {"host": "127.0.0.1", "port": %d}, "apiGrpcPort": %d,
-                            "raft": {"port": %d, "nodes": {"packaged-server": "127.0.0.1:%3$d"},
+                 "server": {"id": "packaged-server", "http": {"host": "127.0.0.1", "port": %d},
+                            "raft": {"port": %d, "nodes": {"packaged-server": "127.0.0.1:%2$d"},
                                      "electionTimeoutMs": 1500, "heartbeatIntervalMs": 300,
                                      "storage": {"type": "raftlog", "path": %s, "fsync": true}},
                             "telemetry": {"enabled": false}%s},
                  "logging": {"directory": %s}}
-                """.formatted(httpPort, freePort(), freePort(), path(run.resolve("data")), ui,
+                """.formatted(httpPort, freePort(), path(run.resolve("data")), ui,
                 path(run.resolve("logs")));
     }
 
