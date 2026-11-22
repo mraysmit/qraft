@@ -59,7 +59,7 @@ import static dev.mars.qraft.common.config.JsonSettings.requiredObject;
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-03-15
- * @version 2.0
+ * @version 2.1
  */
 public final class AppConfig {
     /** Loading and parsing configuration must not initialize Logback before its directory is selected. */
@@ -88,7 +88,7 @@ public final class AppConfig {
     }
 
     /** The {@code server} object of the document, with {@code logging.directory} beside it. */
-    private record Settings(String id, Http http, int apiGrpcPort, Raft raft, String operatorToken,
+    private record Settings(String id, Http http, Raft raft, String operatorToken,
                             Telemetry telemetry, Shutdown shutdown, Health health, AdminUiConfig ui,
                             Acl acl, SecurityProfile profile, String loggingDirectory, Tls tls, Audit audit,
                             Optional<dev.mars.qraft.common.dns.DnsSettings> dns) { }
@@ -100,9 +100,8 @@ public final class AppConfig {
      * {@code server.tls}: the material, or {@code null} when the document has none, and each listener's switch
      * (transport security list, decisions 1 to 4).
      */
-    private record Tls(TlsSettings material, Listener https, Listener grpc, boolean raftEnabled,
-                       boolean raftVerifyServerHostname) {
-        static final Tls NONE = new Tls(null, Listener.OFF, Listener.OFF, false, true);
+    private record Tls(TlsSettings material, Listener https, boolean raftEnabled, boolean raftVerifyServerHostname) {
+        static final Tls NONE = new Tls(null, Listener.OFF, false, true);
     }
 
     /** A listener's TLS switch, and whether it requires a client certificate. */
@@ -169,7 +168,7 @@ public final class AppConfig {
         JsonNode acl = optionalObject(server, "acl");
         JsonNode security = optionalObject(server, "security");
         JsonNode logging = optionalObject(root, "logging");
-        rejectUnknown(server, "server", "id", "http", "apiGrpcPort",
+        rejectUnknown(server, "server", "id", "http",
                 "raft", "telemetry", "shutdown", "health", "ui", "operator", "acl", "security", "tls", "audit", "dns");
         JsonNode audit = optionalObject(server, "audit");
         rejectUnknown(audit, "server.audit", "path", "rotateBytes", "maxFiles");
@@ -202,7 +201,6 @@ public final class AppConfig {
         // the same one first.
         String id = optionalText(server, "id", "");
         Http httpSettings = new Http(optionalText(http, "host", "0.0.0.0"), optionalInt(http, "port", 8080));
-        int apiGrpcPort = optionalInt(server, "apiGrpcPort", 10080);
         int raftPort = optionalInt(raft, "port", 9080);
         Map<String, String> nodes = parseNodes(raft.get("nodes"));
         long electionTimeoutMs = optionalLong(raft, "electionTimeoutMs", 5000);
@@ -239,7 +237,7 @@ public final class AppConfig {
         Set<String> configured = new HashSet<>();
         collectKeys(server, "server", configured);
         collectKeys(logging, "logging", configured);
-        return new AppConfig(new Settings(id, httpSettings, apiGrpcPort,
+        return new AppConfig(new Settings(id, httpSettings,
                 new Raft(raftPort, nodes, electionTimeoutMs, heartbeatIntervalMs, storageSettings, snapshotSettings,
                         logHardLimit, ioSettings, membershipSettings),
                 operatorToken, telemetrySettings, shutdownSettings,
@@ -270,7 +268,6 @@ public final class AppConfig {
         add.accept("server.id", getNodeId());
         add.accept("server.http.host", getHttpHost());
         add.accept("server.http.port", getHttpPort());
-        add.accept("server.apiGrpcPort", getApiGrpcPort());
         add.accept("server.raft.port", getRaftPort());
         add.accept("server.raft.nodes", new LinkedHashMap<>(getClusterMembers()));
         add.accept("server.raft.electionTimeoutMs", getElectionTimeoutMs());
@@ -323,8 +320,6 @@ public final class AppConfig {
                 : material.protocols().contains("TLSv1.2") ? "TLSv1.2" : "TLSv1.3");
         add.accept("server.tls.https.enabled", isHttpsEnabled());
         add.accept("server.tls.https.verifyIncoming", isHttpsVerifyIncoming());
-        add.accept("server.tls.grpc.enabled", isGrpcTlsEnabled());
-        add.accept("server.tls.grpc.verifyIncoming", isGrpcVerifyIncoming());
         add.accept("server.tls.raft.enabled", isRaftTlsEnabled());
         add.accept("server.tls.raft.verifyServerHostname", isRaftVerifyServerHostname());
         add.accept("server.audit.path", getAuditPath().map(Path::toString).orElse(null));
@@ -346,28 +341,24 @@ public final class AppConfig {
     }
 
     private static Tls parseTls(JsonNode tls) {
-        Optional<TlsSettings> material = TlsSettings.parse(tls, "server.tls", "https", "grpc", "raft");
+        Optional<TlsSettings> material = TlsSettings.parse(tls, "server.tls", "https", "raft");
         if (material.isEmpty()) return Tls.NONE;
         JsonNode https = optionalObject(tls, "https");
-        JsonNode grpc = optionalObject(tls, "grpc");
         JsonNode raft = optionalObject(tls, "raft");
         rejectUnknown(https, "server.tls.https", "enabled", "verifyIncoming");
-        rejectUnknown(grpc, "server.tls.grpc", "enabled", "verifyIncoming");
         rejectUnknown(raft, "server.tls.raft", "enabled", "verifyServerHostname");
         Listener httpsListener = new Listener(optionalBoolean(https, "enabled", false),
                 optionalBoolean(https, "verifyIncoming", true));
-        Listener grpcListener = new Listener(optionalBoolean(grpc, "enabled", false),
-                optionalBoolean(grpc, "verifyIncoming", true));
         boolean raftEnabled = optionalBoolean(raft, "enabled", false);
-        boolean[] enabled = {httpsListener.enabled(), grpcListener.enabled(), raftEnabled};
-        String[] names = {"https", "grpc", "raft"};
+        boolean[] enabled = {httpsListener.enabled(), raftEnabled};
+        String[] names = {"https", "raft"};
         for (int index = 0; index < names.length; index++) {
             if (enabled[index] && material.get().certFile().isEmpty()) {
                 throw new IllegalArgumentException("server.tls.certFile and server.tls.keyFile are required for "
                         + "server.tls." + names[index]);
             }
         }
-        return new Tls(material.get(), httpsListener, grpcListener, raftEnabled,
+        return new Tls(material.get(), httpsListener, raftEnabled,
                 optionalBoolean(raft, "verifyServerHostname", true));
     }
 
@@ -402,7 +393,6 @@ public final class AppConfig {
     /** {@code server.dns}: the DNS interface's settings, or empty when it is off (DNS discovery list). */
     public Optional<dev.mars.qraft.common.dns.DnsSettings> getDns() { return settings.dns(); }
     public int getRaftPort() { return settings.raft().port(); }
-    public int getApiGrpcPort() { return settings.apiGrpcPort(); }
     public long getElectionTimeoutMs() { return settings.raft().electionTimeoutMs(); }
     public long getHeartbeatIntervalMs() { return settings.raft().heartbeatIntervalMs(); }
 
@@ -494,10 +484,6 @@ public final class AppConfig {
     public boolean isHttpsEnabled() { return settings.tls().https().enabled(); }
     /** Whether HTTPS requires a client certificate; {@code true} by default (decision 3). */
     public boolean isHttpsVerifyIncoming() { return settings.tls().https().verifyIncoming(); }
-    /** Whether the API gRPC listener serves TLS ({@code server.tls.grpc.enabled}). */
-    public boolean isGrpcTlsEnabled() { return settings.tls().grpc().enabled(); }
-    /** Whether the API gRPC listener requires a client certificate; {@code true} by default (decision 3). */
-    public boolean isGrpcVerifyIncoming() { return settings.tls().grpc().verifyIncoming(); }
     /** Whether the Raft port uses mutual TLS ({@code server.tls.raft.enabled}, decision 4). */
     public boolean isRaftTlsEnabled() { return settings.tls().raftEnabled(); }
     /** Whether a peer's certificate must name the host this server dialled; {@code true} by default. */
@@ -599,7 +585,6 @@ public final class AppConfig {
         validateAcl();
         validateListeningPort("server.http.port", getHttpPort());
         validateListeningPort("server.raft.port", getRaftPort());
-        validateListeningPort("server.apiGrpcPort", getApiGrpcPort());
         validatePort("server.telemetry.prometheusPort", getPrometheusPort());
         if (getRaftPort() == 0 && hasPeers()) {
             throw new IllegalStateException("server.raft.port may be 0 only on a cluster's sole member: "
@@ -649,15 +634,14 @@ public final class AppConfig {
     }
 
     /**
-     * Refuses two listeners on one nonzero port, naming both settings: HTTP, Raft and API gRPC, the Prometheus
-     * listener while telemetry is on, and the DNS listener, which serves TCP as well as UDP (code defects list,
-     * item 15). Consul's configuration builder likewise refuses an address two of its listeners share.
+     * Refuses two listeners on one nonzero port, naming both settings: HTTP and Raft, the Prometheus listener while
+     * telemetry is on, and the DNS listener, which serves TCP as well as UDP (code defects list, item 15). Consul's
+     * configuration builder likewise refuses an address two of its listeners share.
      */
     private void validateDistinctPorts() {
         Map<String, Integer> listeners = new LinkedHashMap<>();
         listeners.put("server.http.port", getHttpPort());
         listeners.put("server.raft.port", getRaftPort());
-        listeners.put("server.apiGrpcPort", getApiGrpcPort());
         if (isTelemetryEnabled()) listeners.put("server.telemetry.prometheusPort", getPrometheusPort());
         getDns().ifPresent(dns -> listeners.put("server.dns.port", dns.port()));
         List<Map.Entry<String, Integer>> ports = List.copyOf(listeners.entrySet());
@@ -707,9 +691,9 @@ public final class AppConfig {
 
     /** Logs the settings an operator looks for first. Call it once the log directory has been selected. */
     public void logConfiguration() {
-        Logging.LOGGER.info("Server configuration: nodeId={}, http={}:{}, raftPort={}, apiGrpcPort={}, "
+        Logging.LOGGER.info("Server configuration: nodeId={}, http={}:{}, raftPort={}, "
                         + "clusterNodes={}, storagePath={}, telemetryEnabled={}",
-                getNodeId(), getHttpHost(), getHttpPort(), getRaftPort(), getApiGrpcPort(),
+                getNodeId(), getHttpHost(), getHttpPort(), getRaftPort(),
                 getClusterNodes(), getRaftStoragePath(), isTelemetryEnabled());
         String file = settings.acl().initialManagementTokenFile();
         Logging.LOGGER.info("ACL configuration: enabled={}, defaultPolicy={}, initialManagementTokenFile={}, "
@@ -729,7 +713,7 @@ public final class AppConfig {
      * The one startup warning a server's ACL settings call for, or none (ACL list, proposals 12, 14 and 16). With ACLs
      * disabled, every call is allowed: a {@code deny} default policy then says so as a critical warning, and otherwise
      * the development profile does. With ACLs enabled, a warning names each listener that does not use TLS, since
-     * tokens sent to it cross the network unencrypted: HTTP, API gRPC, and Raft, which carries forwarded writes.
+     * tokens sent to it cross the network unencrypted: HTTP, and Raft too, since it carries forwarded writes.
      */
     private void logSecurityWarning() {
         if (isAclEnabled()) {
@@ -741,15 +725,11 @@ public final class AppConfig {
                 plain.add("HTTP");
                 settings.add("server.tls.https");
             }
-            if (!isGrpcTlsEnabled()) {
-                plain.add("API gRPC");
-                settings.add("server.tls.grpc");
-            }
             if (!isRaftTlsEnabled()) {
                 plain.add("Raft");
                 settings.add("server.tls.raft");
             }
-            if (plain.size() == 3) {
+            if (plain.size() == 2) {
                 Logging.LOGGER.warn("ACLs are enabled, but no listener uses TLS: tokens cross the network "
                         + "unencrypted. Set {}", inWords(settings));
             } else if (!plain.isEmpty()) {
