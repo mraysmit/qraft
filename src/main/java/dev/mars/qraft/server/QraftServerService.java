@@ -21,8 +21,6 @@ import dev.mars.qraft.common.tls.TlsMaterial;
 import dev.mars.qraft.raft.RaftTls;
 import dev.mars.qraft.common.concurrent.Completions;
 import dev.mars.qraft.common.concurrent.Deadlines;
-import dev.mars.qraft.server.api.AclGrpcGuard;
-import dev.mars.qraft.server.api.DistributedStateGrpcService;
 import dev.mars.qraft.server.acl.AclRemovalAuthorizer;
 import dev.mars.qraft.server.acl.AclResolver;
 import dev.mars.qraft.server.acl.AclTokenExpiry;
@@ -45,7 +43,6 @@ import dev.mars.qraft.raft.RaftNode;
 import dev.mars.qraft.raft.RaftMembershipPolicy;
 import dev.mars.qraft.raft.RaftNodeMode;
 import dev.mars.qraft.raft.RaftTransport;
-import dev.mars.qraft.raft.GrpcServiceServer;
 import dev.mars.qraft.raft.GrpcRaftTransport;
 import dev.mars.qraft.raft.ClusterBootstrap;
 import dev.mars.qraft.raft.MembershipService;
@@ -72,10 +69,10 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
 /**
- * Main service host for the Qraft Server.
+ * Main service host for the Qraft Server. Its listeners are HTTP, Raft and, when {@code server.dns} is set, DNS.
  * 
  * @author Mark Andrew Ray-Smith Cityline Ltd
- * @version 1.0
+ * @version 1.1
  * @since 2025-12-16
  */
 public class QraftServerService {
@@ -111,7 +108,6 @@ public class QraftServerService {
     private Optional<dev.mars.qraft.common.tls.TlsReloader> tlsReloader = Optional.empty();
     /** Mutual TLS on the Raft port and its channels, when {@code server.tls.raft} enables it. */
     private Optional<RaftTls> raftTls = Optional.empty();
-    private Optional<GrpcServiceServer> apiGrpcServer = Optional.empty();
     private Optional<HttpApiServer> httpApiServer = Optional.empty();
     /** The DNS interface, while the server runs with {@code server.dns} set (DNS discovery list). */
     private volatile Optional<dev.mars.qraft.common.dns.DnsServer> dnsServer = Optional.empty();
@@ -152,7 +148,6 @@ public class QraftServerService {
             String nodeId = config.getNodeId();
 
             int raftPort = config.getRaftPort();
-            int apiGrpcPort = config.getApiGrpcPort();
 
             // 2. The cluster's members, and among them this server's peers
             Map<String, String> listedAddresses = new HashMap<>(config.getClusterMembers());
@@ -193,7 +188,7 @@ public class QraftServerService {
                 .whenComplete(Completions.outcome(
                         storage -> {
                             this.raftStorage = storage;
-                            continueStartup(startPromise, nodeId, raftPort, apiGrpcPort, clusterNodeIds,
+                            continueStartup(startPromise, nodeId, raftPort, clusterNodeIds,
                                     listedAddresses, membershipPolicy);
                         },
                         err -> {
@@ -210,7 +205,7 @@ public class QraftServerService {
      * Continues the startup sequence after storage is initialized.
      */
     private void continueStartup(CompletableFuture<Void> startPromise,
-                                 String nodeId, int raftPort, int apiGrpcPort,
+                                 String nodeId, int raftPort,
                                  Set<String> clusterNodeIds, Map<String, String> listedAddresses,
                                  RaftMembershipPolicy membershipPolicy) {
         try {
@@ -260,7 +255,7 @@ public class QraftServerService {
 
             transport.setRaftNode(node);
 
-            // 7. Create and start separate gRPC servers: internal Raft RPC and external API RPC
+            // 7. Create the Raft gRPC server and the HTTP API
             // Joins and operator removals reach any server, over HTTP or the Raft port, and go to the leader. With
             // ACLs enabled a removal needs operator:write, resolved in each deciding server's own state; with them
             // disabled, the operator token.
@@ -282,13 +277,6 @@ public class QraftServerService {
             Optional<ServerTls> httpsTls = config.isHttpsEnabled()
                     ? tlsMaterial.map(material -> new ServerTls(material, config.isHttpsVerifyIncoming()))
                     : Optional.empty();
-            Optional<ServerTls> grpcTls = config.isGrpcTlsEnabled()
-                    ? tlsMaterial.map(material -> new ServerTls(material, config.isGrpcVerifyIncoming()))
-                    : Optional.empty();
-            DistributedStateGrpcService distributedStateService = new DistributedStateGrpcService(node, stateMachine);
-            GrpcServiceServer externalApiServer = new GrpcServiceServer(blockingTasks, apiGrpcPort, grpcTls,
-                    AclGrpcGuard.guard(distributedStateService, aclResolver));
-            this.apiGrpcServer = Optional.of(externalApiServer);
             HttpApiServer healthServer = new HttpApiServer(config.getHttpHost(), config.getHttpPort(), node,
                     stateMachine, Clock.systemUTC(),
                     config.getAdminUi(), UiAssets.forConfig(config.getAdminUi()), HttpApiServer.DEFAULT_RAFT_TIMEOUT,
@@ -352,12 +340,9 @@ public class QraftServerService {
                     ExpiryScheduler.of(expiryExecutor), Clock.systemUTC(), SESSION_TTL_INTERVAL));
             this.sessionTtlExpiry.ifPresent(expiry -> healthServer.useSessionTtl(expiry));
 
-            internalRaftServer.start().thenCompose(v1 -> {
+            internalRaftServer.start().whenComplete(Completions.outcome(
+                    started -> {
                 logger.info("Internal Raft gRPC server started on port {}", internalRaftServer.port());
-                return externalApiServer.start();
-            }).whenComplete(Completions.outcome(
-                    v2 -> {
-                logger.info("External API gRPC server started on port {}", externalApiServer.port());
 
                 try {
                     healthServer.start();
@@ -453,11 +438,9 @@ public class QraftServerService {
         coordinator.onServiceStop("grpc-server-stop", () -> {
             CompletableFuture<Void> raftStop = raftGrpcServer.map(GrpcRaftServer::stop)
                     .orElseGet(QraftServerService::nothingToStop);
-            CompletableFuture<Void> apiStop = apiGrpcServer.map(GrpcServiceServer::stop)
-                    .orElseGet(QraftServerService::nothingToStop);
             stopDns();
             httpApiServer.ifPresent(HttpApiServer::stop);
-            return CompletableFuture.allOf(raftStop, apiStop);
+            return raftStop;
         });
 
         coordinator.onCriticalServiceStop("raft-node-stop", () -> {
@@ -483,8 +466,8 @@ public class QraftServerService {
     }
 
     /**
-     * The ports this server's listeners bound: {@code http}, {@code raft}, and {@code apiGrpc}. A port
-     * configured as 0 is reported as the port the system chose.
+     * The ports this server's listeners bound: {@code http}, {@code raft}, and {@code dns} when it serves DNS. A
+     * port configured as 0 is reported as the port the system chose.
      *
      * @throws IllegalStateException when the server has not started its listeners, or has stopped them
      */
@@ -495,16 +478,15 @@ public class QraftServerService {
     }
 
     /**
-     * The addresses this server's listeners bound: {@code http}, {@code raft}, and {@code apiGrpc}.
+     * The addresses this server's listeners bound: {@code http}, {@code raft}, and {@code dns} when it serves DNS.
      *
      * @throws IllegalStateException when the server has not started its listeners, or has stopped them
      */
     public Map<String, java.net.InetSocketAddress> boundAddresses() {
         HttpApiServer http = httpApiServer.orElseThrow(() -> new IllegalStateException("the server is not running"));
         GrpcRaftServer raft = raftGrpcServer.orElseThrow(() -> new IllegalStateException("the server is not running"));
-        GrpcServiceServer api = apiGrpcServer.orElseThrow(() -> new IllegalStateException("the server is not running"));
         Map<String, java.net.InetSocketAddress> addresses = new java.util.HashMap<>(Map.of("http", http.address(),
-                "raft", raft.address(), "apiGrpc", api.address()));
+                "raft", raft.address()));
         dnsServer.ifPresent(dns -> addresses.put("dns", new java.net.InetSocketAddress(
                 config.getDns().orElseThrow().host(), dns.port())));
         return Map.copyOf(addresses);
@@ -598,12 +580,10 @@ public class QraftServerService {
                             .orElseGet(QraftServerService::nothingToStop);
                     CompletableFuture<Void> internalGrpcStop = raftGrpcServer.map(GrpcRaftServer::stop)
                             .orElseGet(QraftServerService::nothingToStop);
-                    CompletableFuture<Void> externalGrpcStop = apiGrpcServer.map(GrpcServiceServer::stop)
-                            .orElseGet(QraftServerService::nothingToStop);
                     stopDns();
                     httpApiServer.ifPresent(HttpApiServer::stop);
 
-                    CompletableFuture.allOf(expiryStop, raftStop, internalGrpcStop, externalGrpcStop)
+                    CompletableFuture.allOf(expiryStop, raftStop, internalGrpcStop)
                             .whenComplete(Completions.outcome(
                                     v -> {
                                         logger.info("QraftServerService stopped successfully (immediate)");
