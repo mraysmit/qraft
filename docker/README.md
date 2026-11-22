@@ -56,9 +56,9 @@ The folders `config/three-node-acceptance/`, `config/five-node-acceptance/` and 
 belong to the Docker test suite. Its compose files in `src/test/resources` mount the three-node and client
 folders; `DockerDeploymentContractTest` checks all three. Do not change them for a hand-run cluster.
 
-Every server in these files listens inside its container on 8080 for HTTP, 9080 for Raft and 10080 for the
-gRPC API. Only the HTTP port, and the DNS port of the single server, is published to the host; Raft and gRPC
-traffic stays on the Docker network.
+Every server in these files listens inside its container on 8080 for HTTP and 9080 for Raft. Only the HTTP
+port, and the DNS port of the single server, is published to the host; Raft traffic stays on the Docker
+network.
 
 The cluster files use the same container names, `qraft-server1` and so on, so only one of them can run at a
 time: stop one before starting another. The Docker test suite's `DockerStartCommandsTest` also fails while a
