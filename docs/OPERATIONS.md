@@ -1,6 +1,6 @@
 # Qraft Operations Runbook
 
-**Last updated:** 2026-11-21
+**Last updated:** 2026-11-22
 
 This runbook is for the people who deploy and run Qraft. It covers what runs where, how to start a cluster, how to
 watch it, and what to do when something goes wrong. Two references hold the full lists this runbook does not repeat:
@@ -58,16 +58,15 @@ history and the process list. Exit codes are 0 for done, 1 for refused or unreac
 |---|---|---|
 | `server.http.port` | 8080 | HTTP API, health endpoints and the admin interface. |
 | `server.raft.port` | 9080 | Raft traffic between servers (gRPC), joins, removals and forwarded writes. |
-| `server.apiGrpcPort` | 10080 | The API over gRPC. |
 | `server.telemetry.prometheusPort` | 9464 | Prometheus metrics, while `server.telemetry.enabled` is true (the default). |
 | `server.dns.port` | none | DNS over UDP and TCP, only when `server.dns` is given. |
 | `client.httpPort` | 8080 | The client's local API, on `client.bindAddress`. |
 | `client.dns.port` | none | DNS on a client, only when `client.dns` is given. |
 
-No two listeners may share a port: HTTP, Raft, API gRPC, Prometheus while telemetry is on, and DNS when it is
-given. The server's HTTP listener binds `server.http.host` (`0.0.0.0`, every interface, by default); its Raft and
-API gRPC listeners bind every interface. The client's local API listens on the loopback address unless
-`client.bindAddress` names another IP address. A client and a server on the same host both default to port 8080, so
+No two listeners may share a port: HTTP, Raft, Prometheus while telemetry is on, and DNS when it is given. The
+server's HTTP listener binds `server.http.host` (`0.0.0.0`, every interface, by default); its Raft listener binds
+every interface. The client's local API listens on the loopback address unless `client.bindAddress` names another
+IP address. A client and a server on the same host both default to port 8080, so
 change one of them.
 
 ### Files
@@ -302,13 +301,12 @@ traffic. [CONFIGURATION.md](CONFIGURATION.md) lists every key. In summary:
 
 - `server.tls.caFile`, `certFile`, `keyFile` and `minVersion` (`TLSv1.2`, the default, or `TLSv1.3`) give the
   material. On their own they turn on nothing.
-- `server.tls.https.enabled` makes the HTTP port serve HTTPS only; `server.tls.grpc.enabled` does the same for the
-  API gRPC port; `server.tls.raft.enabled` turns on mutual TLS on the Raft port. `https.verifyIncoming` and
-  `grpc.verifyIncoming` (default `true`) require a client certificate; `raft.verifyServerHostname` (default `true`)
-  requires a peer's certificate to name the host dialled.
+- `server.tls.https.enabled` makes the HTTP port serve HTTPS only; `server.tls.raft.enabled` turns on mutual TLS on
+  the Raft port. `https.verifyIncoming` (default `true`) requires a client certificate; `raft.verifyServerHostname`
+  (default `true`) requires a peer's certificate to name the host dialled.
 - `client.tls` gives a client the CA and its own certificate and key for calling HTTPS servers.
 
-With ACLs enabled, a server logs at startup a warning naming each listener without TLS, HTTP, API gRPC or Raft,
+With ACLs enabled, a server logs at startup a warning naming each listener without TLS, HTTP or Raft,
 since tokens sent to it cross the network unencrypted. The Raft listener counts: a follower forwards a write to the
 leader over it, with the caller's token.
 
@@ -320,7 +318,7 @@ readable by the process's user alone.
 
 **Turning it on.**
 
-1. Give every server the material, and set `https`, `grpc` and `raft` enabled together.
+1. Give every server the material, and set `https` and `raft` enabled together.
 2. Restart the servers one at a time. A server with mutual TLS on its Raft port and one without cannot reach each
    other, so a half-changed cluster keeps a quorum only while the changed or the unchanged servers are a majority.
 3. Change each client's `servers.urls` to `https://` and give it `client.tls`; restart it.
@@ -1166,7 +1164,7 @@ investigation.
 - `CRITICAL ACL_DENY_NOT_ENFORCED: server.acl.defaultPolicy is deny, but ACLs are disabled, ...` (WARN), or the same
   for `client.acl.defaultPolicy`: the configuration asks for `deny` without enabling ACLs. Fix the configuration.
 - `ACLs are enabled, but no listener uses TLS: tokens cross the network unencrypted. ...`, and `ACLs are enabled, but
-  the <listeners> do not use TLS: ...` naming the HTTP, API gRPC or Raft listeners that lack it (WARN): see
+  the <listener> listener does not use TLS: ...` naming the HTTP or Raft listener that lacks it (WARN): see
   [Enable TLS](#enable-tls).
 - `Administrative interface enabled at /ui/ while ACLs are disabled: anyone who can reach this server can read and
   change the cluster through it` (WARN): see [Admin interface](#admin-interface).
