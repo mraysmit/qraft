@@ -139,7 +139,7 @@ class CertificateRotationEndToEndTest {
             Files.copy(TlsEndToEndTest.fixture("server.key"), tls.resolve("server.key"));
             Path configuration = root.resolve(id + ".json");
             JSON.writeValue(configuration.toFile(), Map.of("version", 1, "server", Map.of(
-                    "id", id, "http", Map.of("port", http), "apiGrpcPort", freePort(),
+                    "id", id, "http", Map.of("port", http),
                     "raft", Map.of("port", raftPorts.get(id), "nodes", nodes, "electionTimeoutMs", 600,
                             "heartbeatIntervalMs", 150, "storage", Map.of("path", root.resolve(id).toString())),
                     "tls", Map.of("caFile", tls.resolve("ca.pem").toString(),
