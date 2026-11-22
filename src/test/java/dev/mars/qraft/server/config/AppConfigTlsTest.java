@@ -35,13 +35,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Tests {@code server.tls} (transport security list, decisions 1 to 4, Phase 2): no TLS by default; the material and
- * each listener's switch are read; a required client certificate and hostname verification are the defaults; a
- * listener cannot be enabled without a certificate; and the warning that tokens cross the network unencrypted names
- * only the listeners without TLS.
+ * each listener's switch, HTTPS and Raft, are read; a required client certificate and hostname verification are the
+ * defaults; a listener cannot be enabled without a certificate; the retired API gRPC listener's switch is refused; and
+ * the warning that tokens cross the network unencrypted names only the listeners without TLS.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-11-07
- * @version 1.0
+ * @version 1.1
  */
 class AppConfigTlsTest {
     private static final String MATERIAL = "\"caFile\":\"/tls/ca.pem\",\"certFile\":\"/tls/s.pem\",\"keyFile\":\"/tls/s.key\"";
@@ -53,21 +53,18 @@ class AppConfigTlsTest {
 
         assertEquals(Optional.empty(), config.getTlsSettings());
         assertFalse(config.isHttpsEnabled());
-        assertFalse(config.isGrpcTlsEnabled());
         assertFalse(config.isRaftTlsEnabled());
     }
 
     @Test
     void readsTheMaterialAndEachListenerWithItsDefaults() {
-        AppConfig config = config("\"tls\":{" + MATERIAL + ",\"https\":{\"enabled\":true},\"grpc\":{\"enabled\":true},"
+        AppConfig config = config("\"tls\":{" + MATERIAL + ",\"https\":{\"enabled\":true},"
                 + "\"raft\":{\"enabled\":true}}");
 
         assertEquals(Path.of("/tls/ca.pem"), config.getTlsSettings().orElseThrow().caFile());
         assertEquals("server.tls", config.getTlsSettings().orElseThrow().location());
         assertTrue(config.isHttpsEnabled());
         assertTrue(config.isHttpsVerifyIncoming(), "a client certificate is required by default (decision 3)");
-        assertTrue(config.isGrpcTlsEnabled());
-        assertTrue(config.isGrpcVerifyIncoming());
         assertTrue(config.isRaftTlsEnabled());
         assertTrue(config.isRaftVerifyServerHostname(), "decision 4");
     }
@@ -75,11 +72,9 @@ class AppConfigTlsTest {
     @Test
     void eachDefaultCanBeTurnedOff() {
         AppConfig config = config("\"tls\":{" + MATERIAL + ",\"https\":{\"enabled\":true,\"verifyIncoming\":false},"
-                + "\"grpc\":{\"enabled\":true,\"verifyIncoming\":false},"
                 + "\"raft\":{\"enabled\":true,\"verifyServerHostname\":false}}");
 
         assertFalse(config.isHttpsVerifyIncoming());
-        assertFalse(config.isGrpcVerifyIncoming());
         assertFalse(config.isRaftVerifyServerHostname());
     }
 
@@ -89,13 +84,12 @@ class AppConfigTlsTest {
 
         assertTrue(config.getTlsSettings().isPresent());
         assertFalse(config.isHttpsEnabled());
-        assertFalse(config.isGrpcTlsEnabled());
         assertFalse(config.isRaftTlsEnabled());
     }
 
     @Test
     void aListenerCannotServeTlsWithoutACertificate() {
-        for (String listener : List.of("https", "grpc", "raft")) {
+        for (String listener : List.of("https", "raft")) {
             IllegalArgumentException refused = assertThrows(IllegalArgumentException.class, () -> config(
                     "\"tls\":{\"caFile\":\"/tls/ca.pem\",\"" + listener + "\":{\"enabled\":true}}"));
             assertEquals("server.tls.certFile and server.tls.keyFile are required for server.tls." + listener,
@@ -112,6 +106,14 @@ class AppConfigTlsTest {
                 () -> config("\"tls\":{" + MATERIAL + ",\"raft\":{\"verifyIncoming\":false}}"));
     }
 
+    /** The API gRPC listener is retired with the gRPC {@code DistributedStateService}, and so is its TLS switch. */
+    @Test
+    void theRetiredApiGrpcSwitchIsRefused() {
+        IllegalArgumentException refused = assertThrows(IllegalArgumentException.class,
+                () -> config("\"tls\":{" + MATERIAL + ",\"grpc\":{\"enabled\":true}}"));
+        assertEquals("Unknown server.tls setting: grpc", refused.getMessage());
+    }
+
     /**
      * Code defects list, item 5: a follower forwards a write with its token over the Raft port, so a Raft listener
      * without TLS carries tokens in the clear too; the warning left it out.
@@ -119,19 +121,15 @@ class AppConfigTlsTest {
     @Test
     void theUnencryptedWarningNamesOnlyTheListenersWithoutTls() {
         assertEquals(List.of("ACLs are enabled, but no listener uses TLS: tokens cross the network unencrypted. "
-                + "Set server.tls.https, server.tls.grpc and server.tls.raft"), warnings(config(ACL)));
-        assertEquals(List.of("ACLs are enabled, but the API gRPC and Raft listeners do not use TLS: tokens sent to "
-                        + "them cross the network unencrypted. Set server.tls.grpc and server.tls.raft"),
-                warnings(config(ACL + ",\"tls\":{" + MATERIAL + ",\"https\":{\"enabled\":true}}")));
-        assertEquals(List.of("ACLs are enabled, but the HTTP and Raft listeners do not use TLS: tokens sent to them "
-                        + "cross the network unencrypted. Set server.tls.https and server.tls.raft"),
-                warnings(config(ACL + ",\"tls\":{" + MATERIAL + ",\"grpc\":{\"enabled\":true}}")));
+                + "Set server.tls.https and server.tls.raft"), warnings(config(ACL)));
         assertEquals(List.of("ACLs are enabled, but the Raft listener does not use TLS: tokens sent to it cross the "
                         + "network unencrypted. Set server.tls.raft"),
-                warnings(config(ACL + ",\"tls\":{" + MATERIAL
-                        + ",\"https\":{\"enabled\":true},\"grpc\":{\"enabled\":true}}")));
+                warnings(config(ACL + ",\"tls\":{" + MATERIAL + ",\"https\":{\"enabled\":true}}")));
+        assertEquals(List.of("ACLs are enabled, but the HTTP listener does not use TLS: tokens sent to it cross the "
+                        + "network unencrypted. Set server.tls.https"),
+                warnings(config(ACL + ",\"tls\":{" + MATERIAL + ",\"raft\":{\"enabled\":true}}")));
         assertEquals(List.of(), warnings(config(ACL + ",\"tls\":{" + MATERIAL
-                + ",\"https\":{\"enabled\":true},\"grpc\":{\"enabled\":true},\"raft\":{\"enabled\":true}}")));
+                + ",\"https\":{\"enabled\":true},\"raft\":{\"enabled\":true}}")));
     }
 
     private static List<String> warnings(AppConfig config) {
