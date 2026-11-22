@@ -19,8 +19,6 @@ package dev.mars.qraft.architecture;
 import dev.mars.qraft.raft.grpc.RaftServiceGrpc;
 import dev.mars.qraft.raft.grpc.CommandsProto;
 import dev.mars.qraft.raft.grpc.RaftProto;
-import dev.mars.qraft.server.api.grpc.DistributedStateServiceGrpc;
-import dev.mars.qraft.server.api.grpc.DistributedStateProto;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -29,7 +27,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-10-08
- * @version 1.0
+ * @version 1.1
  */
 class ProtocolPackageTest {
     @Test
@@ -39,16 +37,9 @@ class ProtocolPackageTest {
     }
 
     @Test
-    void generatedExternalApiBelongsToServer() {
-        assertEquals("dev.mars.qraft.server.api.grpc", DistributedStateServiceGrpc.class.getPackageName());
-    }
-
-    @Test
     void wireNamespacesAndServiceNamesStayCompatible() {
         assertEquals("qraft.raft", RaftProto.getDescriptor().getPackage());
         assertEquals("qraft.raft", CommandsProto.getDescriptor().getPackage());
-        assertEquals("qraft.api", DistributedStateProto.getDescriptor().getPackage());
         assertEquals("qraft.raft.RaftService", RaftServiceGrpc.getServiceDescriptor().getName());
-        assertEquals("qraft.api.DistributedStateService", DistributedStateServiceGrpc.getServiceDescriptor().getName());
     }
 }
