@@ -1,6 +1,6 @@
 # Qraft Project Standards
 
-**Last updated:** 2026-11-21
+**Last updated:** 2026-11-22
 
 ## 1. Purpose
 
@@ -30,7 +30,7 @@ support that product direction, and code with no role in it is removed.
 
 ### 2.2 Network protocols
 
-- Retain gRPC for server-to-server Raft communication and supported service APIs.
+- Retain gRPC for server-to-server Raft communication.
 - Use the JDK HTTP stack for HTTP endpoints and clients unless an approved requirement demonstrates that it is
   insufficient.
 - Transport implementations must provide explicit startup, shutdown, timeout, and failure behavior.
@@ -69,8 +69,8 @@ Qraft is one Maven project that builds one executable jar. Its code is divided i
 - Common (`dev.mars.qraft.common`) owns shared models, configuration helpers, deadlines, caller-context propagation,
   and the state-loop and blocking executors; it uses no other Qraft layer.
 - Client (`dev.mars.qraft.client`) implements the Java 27 discovery client and may use only Common.
-- Server (`dev.mars.qraft.server`) composes Raft and State, HTTP/external gRPC APIs, telemetry, and lifecycle; it may
-  use Common, Raft, and State.
+- Server (`dev.mars.qraft.server`) composes Raft and State, the HTTP API, telemetry, and lifecycle; it may use
+  Common, Raft, and State.
 - Runtime (`dev.mars.qraft.runtime`) holds the executable entry point, `QraftRuntimeApplication`, which selects server
   mode or client mode, and the command-line tools. It may use every layer and owns no domain logic.
 - A layer must not depend on implementation details from a higher-level layer. `PackageDependencyTest` enforces the
@@ -166,7 +166,7 @@ in production code, and fix both. Rerunning is not a fix.
 
 - Every package keeps at least 60% line coverage: JaCoCo's check, `PACKAGE`, `LINE`, `COVEREDRATIO` 0.60, bound to
   `verify`.
-- The check leaves out generated gRPC code (`dev/mars/qraft/server/**/grpc/**`, `dev/mars/qraft/raft/grpc/**`),
+- The check leaves out generated gRPC code (`dev/mars/qraft/raft/grpc/**`),
   `dev/mars/qraft/server/QraftServerApplication*`, `dev/mars/qraft/server/QraftServerService*`, and JDK classes. The
   list is in `pom.xml`.
 
