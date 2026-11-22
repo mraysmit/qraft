@@ -139,9 +139,9 @@ public final class SharedDockerClusterFixture {
     }
 
     /**
-     * Starts a disposable three-node cluster that serves only TLS (transport security list, Phase 6): HTTPS and API
-     * gRPC TLS requiring a client certificate, and mutual TLS on the Raft port. A server is up once its health check,
-     * which presents the test client certificate, passes.
+     * Starts a disposable three-node cluster that serves only TLS (transport security list, Phase 6): HTTPS
+     * requiring a client certificate, and mutual TLS on the Raft port. A server is up once its health check, which
+     * presents the test client certificate, passes.
      */
     public static ComposeContainer startIsolatedThreeNodeTlsCluster() {
         ensureImageBuilt();
@@ -296,7 +296,7 @@ public final class SharedDockerClusterFixture {
             config = Files.createTempFile("qraft-lock-contender-", ".json");
             Files.writeString(config, """
                     {"version":1,"server":{"id":"lock-contender","http":{"port":8080},
-                    "apiGrpcPort":10080,"raft":{"port":9080,
+                    "raft":{"port":9080,
                     "nodes":{"lock-contender":"localhost:9080"},
                     "storage":{"type":"raftlog","path":"/app/data","fsync":true}},
                     "telemetry":{"enabled":false}}}
