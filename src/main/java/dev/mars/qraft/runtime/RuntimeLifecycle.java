@@ -26,7 +26,7 @@ import java.util.concurrent.CompletableFuture;
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-24
- * @version 1.0
+ * @version 1.1
  */
 public interface RuntimeLifecycle extends AutoCloseable {
     CompletableFuture<Void> completion();
@@ -34,9 +34,10 @@ public interface RuntimeLifecycle extends AutoCloseable {
     CompletableFuture<Void> closeAsync();
 
     /**
-     * The addresses this runtime listens on, by listener: {@code http} in both modes, and {@code raft} and
-     * {@code apiGrpc} for a server. Each is the address the listener bound, the loopback address for a client's
-     * local API unless configured otherwise, and a port configured as 0 is reported as the port the system chose.
+     * The addresses this runtime listens on, by listener: {@code http} in both modes, and {@code raft}, and
+     * {@code dns} when it serves DNS, for a server. Each is the address the listener bound, the loopback address
+     * for a client's local API unless configured otherwise, and a port configured as 0 is reported as the port the
+     * system chose.
      *
      * @throws IllegalStateException when the runtime is no longer listening
      */
