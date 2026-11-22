@@ -44,7 +44,6 @@ class AppConfigCoverageTest {
                   "server": {
                     "id": "server-a",
                     "http": {"host": "127.0.0.1", "port": 8180},
-                    "apiGrpcPort": 10180,
                     "raft": {
                       "port": 9180,
                       "nodes": {"server-a":"server-a:9180","server-b":"server-b:9180"},
@@ -63,7 +62,6 @@ class AppConfigCoverageTest {
         assertEquals("server-a", config.getNodeId());
         assertEquals(8180, config.getHttpPort());
         assertEquals(9180, config.getRaftPort());
-        assertEquals(10180, config.getApiGrpcPort());
         assertEquals("server-a=server-a:9180,server-b=server-b:9180", config.getClusterNodes());
         assertEquals(List.of(Map.entry("server-a", "server-a:9180"), Map.entry("server-b", "server-b:9180")),
                 List.copyOf(config.getClusterMembers().entrySet()), "the members keep the document's order");
