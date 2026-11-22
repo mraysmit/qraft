@@ -70,7 +70,6 @@ class QraftServerConfigurationReadTest {
         Map<String, Object> server = new LinkedHashMap<>();
         server.put("id", "conf-server");
         server.put("http", Map.of("host", "127.0.0.1", "port", 0));
-        server.put("apiGrpcPort", 0);
         server.put("raft", Map.of("port", 0, "electionTimeoutMs", 300, "heartbeatIntervalMs", 100,
                 "storage", Map.of("path", directory.resolve("raft").toString())));
         server.put("operator", Map.of("token", OPERATOR_SECRET));
