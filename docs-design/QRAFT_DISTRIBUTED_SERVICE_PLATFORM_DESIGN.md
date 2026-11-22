@@ -1,7 +1,7 @@
 # Qraft Distributed Service Platform Design
 
 **Status:** Draft  
-**Last updated:** 2026-11-21
+**Last updated:** 2026-11-22
 
 This document is Qraft's design: what Qraft is and why, the contracts its parts keep,
 and the rules that decide its behaviour. Reference detail lives elsewhere:
@@ -163,7 +163,6 @@ each its own package tree under `dev.mars.qraft`:
 | | `client.api` | The Java client library: `QraftApi`, `KeyValue`, `Sessions`, `LeaderElection`. |
 | Server | `server` | `QraftServerApplication` and `QraftServerService`: composition and lifecycle. |
 | | `server.http` | `HttpApiServer` and its route classes, request DTOs, the request context, audit and request metrics. |
-| | `server.api` | The external gRPC `DistributedStateService` and its ACL guard; generated classes in `server.api.grpc`. |
 | | `server.acl` | Token resolution, token expiry, management-token installation, JWT and Kubernetes login. |
 | | `server.health` | Leader-owned check and node expiry. |
 | | `server.session` | `SessionTtlExpiry`, the leader's session timers. |
@@ -193,10 +192,11 @@ Common  -> no other Qraft layer
   mutation fixtures prove that forbidden references are reported.
 - Public HTTP and gRPC DTOs stay at adapter boundaries and map explicitly to domain
   commands.
-- Generated protobuf classes follow ownership (`raft.grpc`, `server.api.grpc`), while
-  the wire namespaces `qraft.raft` and `qraft.api` and the service names
-  `qraft.raft.RaftService` and `qraft.api.DistributedStateService` stay fixed
-  (`ProtocolPackageTest`).
+- Generated protobuf classes follow ownership (`raft.grpc`), while the wire
+  namespace `qraft.raft` and the service name `qraft.raft.RaftService` stay fixed
+  (`ProtocolPackageTest`). The external gRPC `DistributedStateService`, with its
+  namespace `qraft.api`, is retired: no client used it, it did not forward to the
+  leader, and its writes were not audited.
 
 ### 4.2 Runtime and modes
 
@@ -212,8 +212,8 @@ boundary:
 4. `/etc/qraft/server.json` or `/etc/qraft/client.json`.
 
 Both modes return the same runtime-owned lifecycle: its completion, one idempotent
-asynchronous close, and the addresses its listeners bound, by name (`http`, `raft`,
-`apiGrpc` and `dns` for a server; `http` for a client). The process entry point and its
+asynchronous close, and the addresses its listeners bound, by name (`http`, `raft`
+and `dns` for a server; `http` for a client). The process entry point and its
 shutdown hook use that lifecycle directly; no mode starts another application's static
 `main`.
 
@@ -267,8 +267,8 @@ servers as commands.
 
 `qraft server` validates its configuration, opens durable storage, starts the Raft
 transport and node, and starts its public listeners: HTTP (with the administrative
-interface), the external gRPC API and, when configured, DNS. It takes part in the quorum
-and applies committed commands.
+interface) and, when configured, DNS. It takes part in the quorum and applies
+committed commands.
 
 Server mode owns:
 
@@ -277,8 +277,7 @@ Server mode owns:
   (section 5);
 - leader-only background work: check and node expiry (section 7), session TTLs
   (section 5.6), ACL token expiry and management-token installation (section 11);
-- the HTTP API, the external gRPC `DistributedStateService`, DNS, metrics and the
-  embedded administrative interface.
+- the HTTP API, DNS, metrics and the embedded administrative interface.
 
 A server is live while its process and HTTP listener run; `/health/live` is unaffected
 by every other condition. It is ready when it can serve its advertised behaviour:
@@ -589,8 +588,10 @@ Key/value entries follow Consul's KV store:
   Consul's `KeyWritePrefix` decides it. There is no `list` access.
 - `qraft kv get`, `put` and `delete` drive it from the command line, with Consul's
   messages.
-- The older replicated metadata map and the gRPC `DistributedStateService` that serves
-  it are separate from `/v1/kv`.
+- The older replicated metadata map is separate from `/v1/kv`. The gRPC
+  `DistributedStateService` that served it is retired, so nothing outside the state
+  machine reads or writes it; stored log entries and snapshots that hold it still
+  decode.
 
 ### 5.6 Sessions and locks
 
@@ -1515,8 +1516,7 @@ ACLs follow Consul's model.
   - *Operator*: `operator:read` for the Raft status, configuration, membership, storage,
     autopilot, configuration and event reads; `operator:write` for tenancy changes and a
     server removal, checked on the receiving server and again by the leader
-    (`AclRemovalAuthorizer`). Every call to the gRPC `DistributedStateService` needs
-    `operator:write` from `x-qraft-token` metadata (`server.api.AclGrpcGuard`).
+    (`AclRemovalAuthorizer`).
   - *ACL API*: `acl:read` or `acl:write`, except the token's own `self`, `authorize` and
     `resolve`, which answer only for the presenting token. A request cannot delete its
     own token. With ACLs disabled the ACL API, its auth method, binding rule, login and
@@ -1581,8 +1581,7 @@ every listener is plain.
 - **The HTTP listener serves HTTPS or HTTP, never both.** It requires a client
   certificate from the CA unless `verifyIncoming` is `false`. Consul defaults that to
   `false`; Qraft defaults it to `true`, so a stolen token is of no use from a machine
-  without a certificate. Health probes on that listener present a certificate too. The
-  API gRPC port follows the same rule.
+  without a certificate. Health probes on that listener present a certificate too.
 - **The Raft port uses mutual TLS**: a server presents its certificate, requires one from
   each peer, and checks that a dialled peer's certificate names the host in
   `server.raft.nodes` unless `verifyServerHostname` is `false` (`raft.GrpcTls`). A peer
@@ -1815,7 +1814,7 @@ deadline:
 |---|---|---|
 | `DRAIN` (state `DRAINING`) | `server.shutdown.drainTimeoutMs` | Hooks that stop accepting new work. |
 | `AWAIT_COMPLETION` | `server.shutdown.timeoutMs` | Hooks that wait for active work; the server registers none, since no server-managed work remains after draining. |
-| `STOP_SERVICES` (state `SHUTTING_DOWN`) | `server.shutdown.timeoutMs` | Leader-only work (token installation, token and session expiry, health expiry), the audit sink and TLS reloader; then the Raft and API gRPC servers, DNS and the HTTP listener; then the Raft node, which closes storage. |
+| `STOP_SERVICES` (state `SHUTTING_DOWN`) | `server.shutdown.timeoutMs` | Leader-only work (token installation, token and session expiry, health expiry), the audit sink and TLS reloader; then the Raft gRPC server, DNS and the HTTP listener; then the Raft node, which closes storage. |
 | `CLOSE_RESOURCES` | `server.shutdown.timeoutMs` | Hooks that close remaining resources; the server registers none, since stopping the Raft node closes storage. |
 
 A hook that fails or times out is logged and the sequence goes on, except a critical one:
