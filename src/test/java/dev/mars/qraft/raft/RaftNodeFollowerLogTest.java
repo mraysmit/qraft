@@ -16,6 +16,10 @@
 
 package dev.mars.qraft.raft;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.google.protobuf.ByteString;
 import dev.mars.qraft.raft.grpc.AppendEntriesRequest;
 import dev.mars.qraft.raft.grpc.AppendEntriesResponse;
@@ -24,9 +28,13 @@ import dev.mars.qraft.state.DistributedStateRaftCommand;
 import dev.mars.qraft.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.state.QraftStateStore;
 import dev.mars.qraft.state.distributed.DistributedStateCommand;
+import dev.mars.qraft.testing.LogCapturesHelper;
+import dev.mars.raftlog.storage.AppendPlan;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
@@ -40,11 +48,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * Tests a follower's own log: it reports and commits only the entries a request verified, never a stale
  * uncommitted tail from an earlier term; it compacts its log on its own snapshot schedule; and it accepts
  * an append whose previous entry lies inside its snapshot, because everything a snapshot covers is
- * committed and identical on the leader.
+ * committed and identical on the leader; and it plans an append from the entries the request overlaps, not its
+ * whole log.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-27
- * @version 1.1
+ * @version 1.2
  */
 class RaftNodeFollowerLogTest {
     private static final long SNAPSHOT_INTERVAL_MS = 200;
@@ -109,6 +118,66 @@ class RaftNodeFollowerLogTest {
         assertEquals(4, staleHeartbeat.getMatchIndex(),
                 "a heartbeat inside the snapshot verifies the log only through the snapshot boundary");
         assertFalse(follower.isFenced());
+    }
+
+    /**
+     * A follower compares a request only with the entries it overlaps and the one before them, as hashicorp/raft
+     * does; building the whole log for each heartbeat made the cost of every AppendEntries grow with the log.
+     */
+    @Test
+    void aHeartbeatToAFollowerWithALongLogIsPlannedFromThePreviousEntryAlone() throws Exception {
+        startFollower();
+        String[] keys = new String[50];
+        for (int i = 0; i < keys.length; i++) keys[i] = "k" + (i + 2);
+        assertTrue(append(1, 1, 0, 1, keys).getSuccess());
+
+        List<String> plans = plannedWhile(() -> assertTrue(append(1, 51, 1, 51).getSuccess()));
+
+        assertEquals(List.of("Calculating append plan: startIndex=52, incomingEntries=0, currentLog=1, "
+                + "compactionBoundary=50"), plans);
+        assertEquals(51, follower.getCommitIndex());
+    }
+
+    /** The plan sees only the entries the request overlaps; the tail it replaces is still removed whole. */
+    @Test
+    void aConflictBehindALongUncommittedTailStillReplacesTheWholeTail() throws Exception {
+        startFollower();
+        String[] stale = new String[40];
+        for (int i = 0; i < stale.length; i++) stale[i] = "stale" + (i + 2);
+        assertTrue(append(1, 1, 0, 1, stale).getSuccess());
+
+        AppendEntriesResponse replaced = append(2, 1, 0, 3, "new2", "new3");
+
+        assertTrue(replaced.getSuccess());
+        assertEquals(3, replaced.getMatchIndex());
+        assertEquals(3, follower.getCommitIndex());
+        assertEquals(Optional.of("new3"), store.findMetadata("new3"));
+        assertEquals(Optional.empty(), store.findMetadata("stale2"), "a replaced entry is never applied");
+        AppendEntriesResponse beyond = append(2, 41, 1, 3);
+        assertFalse(beyond.getSuccess(), "the replaced tail is gone: entry 41 is no longer held");
+    }
+
+    /** The append plans calculated while {@code action} runs, as raftlog's AppendPlan reports them at DEBUG. */
+    private static List<String> plannedWhile(ThrowingRunnable action) throws Exception {
+        Logger logger = (Logger) LoggerFactory.getLogger(AppendPlan.class);
+        Level level = logger.getLevel();
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.setLevel(Level.DEBUG);
+        logger.addAppender(appender);
+        try {
+            action.run();
+        } finally {
+            logger.detachAppender(appender);
+            logger.setLevel(level);
+        }
+        return LogCapturesHelper.snapshot(appender).stream().map(ILoggingEvent::getFormattedMessage)
+                .filter(message -> message.startsWith("Calculating append plan")).toList();
+    }
+
+    @FunctionalInterface
+    private interface ThrowingRunnable {
+        void run() throws Exception;
     }
 
     /**

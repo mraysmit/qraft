@@ -79,7 +79,7 @@ import static java.util.Objects.requireNonNull;
  * </ul>
  * 
  * @author Mark Andrew Ray-Smith Cityline Ltd
- * @version 1.0
+ * @version 1.1
  * @since 2025-08-20
  */
 public class RaftNode {
@@ -2991,14 +2991,19 @@ public class RaftNode {
             }
         }
 
-        // Exclude Qraft's in-memory snapshot sentinel. RaftLog receives absolute
-        // indices plus the inclusive snapshot/compaction boundary.
-        List<LogEntryData> currentEntryData = log.stream().skip(1)
-                .map(entry -> new LogEntryData(entry.getIndex(), entry.getTerm(),
-                        payloadOf(entry).toByteArray()))
-                .toList();
+        // The plan compares the request with the entries it overlaps and the one before them, as hashicorp/raft
+        // does; giving it every held entry made each AppendEntries, a heartbeat included, cost as much as the log.
+        // The window begins after the snapshot sentinel, and the plan takes the entry before it as its boundary:
+        // no incoming entry lies at or below that boundary unless the snapshot covers it.
+        long windowStart = Math.max(snapshotLastIndex + 1, startIndex - 1);
+        long windowEnd = Math.min(lastLogIndex(), startIndex - 1 + incomingEntryData.size());
+        List<LogEntryData> currentEntryData = new ArrayList<>();
+        for (long index = windowStart; index <= windowEnd; index++) {
+            LogEntry held = log.get(toArrayIndex(index));
+            currentEntryData.add(new LogEntryData(held.getIndex(), held.getTerm(), payloadOf(held).toByteArray()));
+        }
         AppendPlan appendPlan = AppendPlan.from(
-                startIndex, incomingEntryData, currentEntryData, snapshotLastIndex);
+                startIndex, incomingEntryData, currentEntryData, windowStart - 1);
         Long truncateFromIndex = appendPlan.truncateFromIndex();
         if (truncateFromIndex != null && truncateFromIndex <= commitIndex) {
             // A correct leader never conflicts with a committed entry. Replacing it would lose the entry, which
