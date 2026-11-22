@@ -248,7 +248,7 @@ class LocalDiscoveryRoutesTest {
 
         try (Socket socket = new Socket("127.0.0.1", api.port())) {
             socket.getOutputStream().write(("GET /v1/catalog/services HTTP/1.1\r\nHost: 127.0.0.1\r\n"
-                    + "X-Qraft-Tenant: aéb\r\nConnection: close\r\n\r\n").getBytes(StandardCharsets.ISO_8859_1));
+                    + "X-Qraft-Tenant: a\u00e9b\r\nConnection: close\r\n\r\n").getBytes(StandardCharsets.ISO_8859_1));
             String answer = new String(socket.getInputStream().readAllBytes(), StandardCharsets.ISO_8859_1);
 
             assertTrue(answer.startsWith("HTTP/1.1 400"), answer);
@@ -263,7 +263,7 @@ class LocalDiscoveryRoutesTest {
 
         try (Socket socket = new Socket("127.0.0.1", api.port())) {
             socket.getOutputStream().write(("GET /v1/catalog/services HTTP/1.1\r\nHost: 127.0.0.1\r\n"
-                    + "X-Request-Id: aéb\r\nConnection: close\r\n\r\n").getBytes(StandardCharsets.ISO_8859_1));
+                    + "X-Request-Id: a\u00e9b\r\nConnection: close\r\n\r\n").getBytes(StandardCharsets.ISO_8859_1));
             String answer = new String(socket.getInputStream().readAllBytes(), StandardCharsets.ISO_8859_1);
 
             assertTrue(answer.startsWith("HTTP/1.1 400"), answer);

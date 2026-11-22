@@ -627,9 +627,11 @@ configuration file.
 
 The client keeps no copy of the catalog or the key/value state. These routes forward the request to the servers, with
 its path and query as written, its `X-Qraft-Tenant` and `X-Qraft-Namespace` headers (else the client's own tenant and
-namespace, `catalog.tenant` and `catalog.namespace`), its token (else the client's `default` token) and its request ID. The servers decide and filter. A scope
-header or request ID that holds a character that cannot be sent on is refused with 400 `invalid_scope` or
-`invalid_request_id`.
+namespace, `catalog.tenant` and `catalog.namespace`), its token (else the client's `default` token) and its request
+ID. The servers decide and filter. A scope header or request ID that holds a character that cannot be sent on, a tab
+or a byte above 0x7e, is refused with 400 `invalid_scope` or `invalid_request_id`. A request whose headers hold any
+other control character never reaches the route on a JDK with the October 2026 security fixes: the JDK's listener
+refuses it first, with a 400 page of its own and no JSON body.
 
 | Methods | Paths | Server routes |
 |---|---|---|

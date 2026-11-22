@@ -17,8 +17,9 @@ pipeline {
     }
 
     environment {
-        JAVA_HOME = "${WORKSPACE}@tools/sapmachine-jdk-27"
-        PATH = "${WORKSPACE}@tools/sapmachine-jdk-27/bin:${env.PATH}"
+        // The directory names the exact build: a new version installs beside the old one instead of being skipped.
+        JAVA_HOME = "${WORKSPACE}@tools/sapmachine-jdk-27.0.1.1"
+        PATH = "${WORKSPACE}@tools/sapmachine-jdk-27.0.1.1/bin:${env.PATH}"
     }
 
     stages {
@@ -39,10 +40,15 @@ if [[ ! -x "$JAVA_HOME/bin/javac" ]]; then
     archive="${JAVA_HOME}.tar.gz"
     curl --fail --location --retry 3 --connect-timeout 20 --max-time 600 \
         --output "$archive" \
-        https://github.com/SAP/SapMachine/releases/download/sapmachine-27/sapmachine-jdk-27_linux-x64_bin.tar.gz
-    printf '%s  %s\\n' de400f5991c440d9a454e8d6470cec398ed5cf13277ba890d519d8c661bd8194 "$archive" | sha256sum --check -
+        https://github.com/SAP/SapMachine/releases/download/sapmachine-27.0.1.1/sapmachine-jdk-27.0.1.1_linux-x64_bin.tar.gz
+    printf '%s  %s\\n' 3245b5678e7a1dafd38637a12f795518f13e2781fd1a6d23629f0200fd397139 "$archive" | sha256sum --check -
     tar -xzf "$archive" -C "$JAVA_HOME" --strip-components=1
     rm -- "$archive"
+fi
+if ! grep -qx 'JAVA_VERSION="27.0.1.1"' "$JAVA_HOME/release"; then
+    echo "The JDK in $JAVA_HOME is not 27.0.1.1:" >&2
+    grep '^JAVA_VERSION=' "$JAVA_HOME/release" >&2 || true
+    exit 1
 fi
 java --version
 javac --version

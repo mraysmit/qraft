@@ -18,8 +18,12 @@ for builds is archived in
 - **Trigger:** manual only, with no recurring trigger. Concurrent builds are disabled.
 - **Retention:** 20 builds, and the artifacts of the latest 10.
 - **Caches:** the workspace is `/var/lib/jenkins/workspace/Qraft`. The JDK is cached in
-  `<workspace>@tools/sapmachine-jdk-27` and the Maven repository in `<workspace>@repository`; both survive the fresh
-  checkout. The pipeline sets its own `JAVA_HOME` and `PATH` and changes no other job's Java.
+  `<workspace>@tools/sapmachine-jdk-<version>` and the Maven repository in `<workspace>@repository`; both survive the
+  fresh checkout. The pipeline sets its own `JAVA_HOME` and `PATH` and changes no other job's Java.
+- **The JDK is the pipeline's own.** No package on the server provides it, so updating the server's packages or
+  Jenkins does not update it. A new JDK takes a change to the `Jenkinsfile`: the version in `JAVA_HOME`, `PATH`, the
+  download URL and the version check, and the release's SHA-256. The version in the directory name makes the new JDK
+  install beside the old one; the old directory can then be removed by hand.
 - **When it runs:** after the owner has committed and pushed; a build sees only what is on `main`. It is started and
   read through the API below. How an AI assistant takes part is in [`AGENTS.md`](../AGENTS.md).
 
@@ -36,8 +40,9 @@ their defaults.
 ## Stages
 
 1. **Checkout**, as above.
-2. **Toolchain and Docker.** On the first build, downloads SapMachine JDK 27 from its GitHub release and checks its
-   pinned SHA-256 checksum. Then prints the versions of `java`, `javac`, `mvn`, `docker` and `docker compose`.
+2. **Toolchain and Docker.** On the first build after a JDK change, downloads SapMachine JDK 27.0.1.1 from its GitHub
+   release and checks its pinned SHA-256 checksum. Fails unless the JDK's `release` file names 27.0.1.1. Then prints the
+   versions of `java`, `javac`, `mvn`, `docker` and `docker compose`.
 3. **PIT mutation testing**, only when `MUTATION_TESTING` is not `off`. The suites below are skipped. Its report is
    copied to `reports/pit/`.
 4. **Default tests and coverage gates**, which also runs the frontend's Vitest tests and packages `target/qraft.jar`,
